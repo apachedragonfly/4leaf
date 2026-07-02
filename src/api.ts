@@ -1,10 +1,12 @@
+import { Capacitor } from '@capacitor/core'
 import type { Board, BoardsResponse, CatalogPage, Post, ThreadResponse } from './types'
 
-const API = `${import.meta.env.BASE_URL}api/4chan`
+const API = Capacitor.isNativePlatform() ? 'https://a.4cdn.org' : `${import.meta.env.BASE_URL}api/4chan`
 const MEDIA = 'https://i.4cdn.org'
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(`${API}?path=${encodeURIComponent(path)}`, { signal })
+  const url = Capacitor.isNativePlatform() ? `${API}${path}` : `${API}?path=${encodeURIComponent(path)}`
+  const response = await fetch(url, { signal })
   if (!response.ok) throw new Error(response.status === 404 ? 'This thread has expired.' : `4chan returned ${response.status}.`)
   return response.json() as Promise<T>
 }

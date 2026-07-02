@@ -5,6 +5,7 @@ import {
   Search, Send, Settings, Share, ShieldCheck, Sun, X,
 } from 'lucide-react'
 import { getBoards, getCatalog, getThread, mediaUrl, officialBoardUrl, officialThreadUrl, thumbnailUrl } from './api'
+import { authorizePass, clearPass, hasAuthorizedPass, isNativeApp, submitNativeReply } from './native'
 import type { Board, Post, Route } from './types'
 import { formatBytes, htmlToText, navigate, parseRoute, timeAgo, useStoredState } from './utils'
 
@@ -126,10 +127,6 @@ function Home({ boards, favorites, saved, onToggleFavorite }: { boards: Board[];
   const filtered = boards.filter((b) => `${b.board} ${b.title}`.toLowerCase().includes(query.toLowerCase()))
   const visible = query || showAll ? filtered : filtered.slice(0, 18)
   return <div className="content home-content">
-    <section className="hero">
-      <div><span className="eyebrow">Leaf through the noise</span><h2>What are you reading?</h2><p>Browse the catalog, save the good threads, leave no account behind.</p></div>
-      <div className="hero-mark"><Logo /></div>
-    </section>
     <div className="search-box"><Search size={19} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a board" aria-label="Find a board" />{query && <button onClick={() => setQuery('')}><X size={17} /></button>}</div>
     {Object.keys(saved).length > 0 && <section className="section-block"><SectionHeading title="Saved threads" action="See in sidebar" /><div className="saved-grid">{Object.values(saved).sort((a, b) => b.savedAt - a.savedAt).slice(0, 3).map((item) => <button className="saved-card" key={`${item.board}/${item.no}`} onClick={() => navigate(item.board, item.no)}><span>/{item.board}/</span><strong>{item.title}</strong><small>Thread #{item.no}</small><ChevronRight /></button>)}</div></section>}
     <section className="section-block">
@@ -185,7 +182,7 @@ function Thread({ board, thread, saved, onToggleSaved }: { board: string; thread
     {loading ? <ThreadSkeleton /> : error ? <ErrorState message={error} retry={load} /> : <div className="posts">{posts.map((post, index) => <PostView key={post.no} board={board} post={post} op={index === 0} onMedia={() => setMediaIndex(media.findIndex((item) => item.no === post.no))} onReply={() => openReply(post.no)} />)}</div>}
     {galleryOpen && <MediaGallery board={board} posts={media} onClose={() => setGalleryOpen(false)} onSelect={(index) => { setGalleryOpen(false); setMediaIndex(index) }} />}
     {mediaIndex !== null && <MediaViewer board={board} posts={media} index={mediaIndex} onIndex={setMediaIndex} onClose={() => setMediaIndex(null)} />}
-    {replyOpen && <ReplyComposer key={`${board}/${thread}/${replyQuote ?? 'thread'}`} board={board} thread={thread} quote={replyQuote} onClose={() => setReplyOpen(false)} />}
+    {replyOpen && <ReplyComposer key={`${board}/${thread}/${replyQuote ?? 'thread'}`} board={board} thread={thread} quote={replyQuote} onClose={() => setReplyOpen(false)} onPosted={() => { setReplyOpen(false); setTimeout(load, 1200) }} />}
   </div>
 }
 
@@ -219,9 +216,14 @@ function MediaGallery({ board, posts, onSelect, onClose }: { board: string; post
   return <div className="gallery-view" role="dialog" aria-modal="true"><header><div><span className="eyebrow">/{board}/ thread media</span><h2>Gallery</h2></div><div><span>{posts.length} files</span><button className="icon-button" onClick={onClose}><X /></button></div></header><div className="gallery-grid">{posts.map((post, index) => <button key={post.no} onClick={() => onSelect(index)}><img src={post.ext === '.webm' ? thumbnailUrl(board, post)! : mediaUrl(board, post)!} alt={post.filename || `Post ${post.no}`} loading="lazy" decoding="async" referrerPolicy="no-referrer" /><span>{post.ext?.slice(1).toUpperCase()} · No.{post.no}</span>{post.ext === '.webm' && <i>▶</i>}</button>)}</div></div>
 }
 
-function ReplyComposer({ board, thread, quote, onClose }: { board: string; thread: number; quote: number | null; onClose: () => void }) {
+function ReplyComposer({ board, thread, quote, onClose, onPosted }: { board: string; thread: number; quote: number | null; onClose: () => void; onPosted: () => void }) {
   const [draft, setDraft] = useStoredState(`4leaf.draft.${board}.${thread}`, '')
   const [status, setStatus] = useState('')
+  const [name, setName] = useStoredState('4leaf.postName', '')
+  const [options, setOptions] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [spoiler, setSpoiler] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   useEffect(() => {
     if (!quote) return
     const marker = `>>${quote}`
@@ -238,7 +240,18 @@ function ReplyComposer({ board, thread, quote, onClose }: { board: string; threa
       setStatus('Copy the draft manually, then continue to 4chan.')
     }
   }
-  return <><button className="scrim visible reply-scrim" onClick={onClose} /><aside className="reply-composer"><div className="sheet-head"><div><span className="eyebrow">/{board}/ · No.{thread}</span><h2>Quick reply</h2></div><button className="icon-button" onClick={onClose}><X /></button></div><textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Write a reply…" aria-label="Reply text" /><div className="composer-count">{draft.length.toLocaleString()} characters</div><div className="handoff-note"><ShieldCheck /><p><strong>Secure posting handoff</strong><span>4leaf copies your draft, then opens 4chan to handle your Pass, CAPTCHA, attachment, and final submission.</span></p></div>{status && <p className="composer-status">{status}</p>}<div className="composer-actions"><button className="secondary" disabled={!draft} onClick={() => setDraft('')}><X size={16} /> Clear</button><button className="primary" disabled={!draft.trim()} onClick={continueTo4chan}><Copy size={16} /> Copy & continue <Send size={15} /></button></div></aside></>
+  const postNative = async () => {
+    if (!draft.trim() && !file) return
+    setSubmitting(true); setStatus('Posting…')
+    try {
+      const result = await submitNativeReply({ board, thread, comment: draft, name, options, file, spoiler })
+      if (result.error) { setStatus(result.error); return }
+      setDraft(''); setFile(null); setStatus(`Posted as No.${result.post}.`); onPosted()
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'The reply could not be posted.')
+    } finally { setSubmitting(false) }
+  }
+  return <><button className="scrim visible reply-scrim" onClick={onClose} /><aside className="reply-composer"><div className="sheet-head"><div><span className="eyebrow">/{board}/ · No.{thread}</span><h2>Quick reply</h2></div><button className="icon-button" onClick={onClose}><X /></button></div>{isNativeApp && <div className="composer-fields"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)" /><input value={options} onChange={(e) => setOptions(e.target.value)} placeholder="Options (e.g. sage)" /></div>}<textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Write a reply…" aria-label="Reply text" /><div className="composer-count">{draft.length.toLocaleString()} characters</div>{isNativeApp ? <div className="native-attachment"><label><ImageIcon /> <span>{file ? file.name : 'Attach image or WebM'}</span><input type="file" accept="image/*,.webm,video/webm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label><label className="spoiler-toggle"><input type="checkbox" checked={spoiler} onChange={(e) => setSpoiler(e.target.checked)} /> Spoiler</label></div> : <div className="handoff-note"><ShieldCheck /><p><strong>Secure posting handoff</strong><span>The web app copies your draft and opens 4chan for final submission. Install the native build to post directly.</span></p></div>}{status && <p className="composer-status">{status}</p>}<div className="composer-actions"><button className="secondary" disabled={!draft && !file} onClick={() => { setDraft(''); setFile(null) }}><X size={16} /> Clear</button>{isNativeApp ? <button className="primary" disabled={submitting || (!draft.trim() && !file)} onClick={postNative}><Send size={16} /> {submitting ? 'Posting…' : 'Post reply'}</button> : <button className="primary" disabled={!draft.trim()} onClick={continueTo4chan}><Copy size={16} /> Copy & continue <Send size={15} /></button>}</div></aside></>
 }
 
 function SettingsSheet({ theme, onTheme, onClose }: { theme: Theme; onTheme: (theme: Theme) => void; onClose: () => void }) {
@@ -246,9 +259,29 @@ function SettingsSheet({ theme, onTheme, onClose }: { theme: Theme; onTheme: (th
   return <><button className="scrim visible" onClick={onClose} /><aside className="settings-sheet"><div className="sheet-head"><div><span className="eyebrow">4leaf</span><h2>Settings</h2></div><button className="icon-button" onClick={onClose}><X /></button></div>
     <section><h3>Appearance</h3><div className="segmented"><button className={theme === 'light' ? 'active' : ''} onClick={() => onTheme('light')}><Sun /> Light</button><button className={theme === 'dark' ? 'active' : ''} onClick={() => onTheme('dark')}><Moon /> Dark</button></div></section>
     <section><h3>Install 4leaf</h3>{standalone ? <div className="installed"><Check /> Installed on this device</div> : <div className="install-note"><Share /><p><strong>Add to your Home Screen</strong><span>In Safari, tap Share, then “Add to Home Screen.”</span></p></div>}</section>
-    <section><h3>4chan Pass</h3><p className="settings-copy">Pass authorization must happen on 4chan so Safari can store its secure cookie. Once authorized, use “Open official” or “Reply” from 4leaf.</p><a className="secondary wide" href="https://sys.4chan.org/auth" target="_blank" rel="noreferrer">Authorize on 4chan <ExternalLink size={16} /></a></section>
+    <section><h3>4chan Pass</h3>{isNativeApp ? <NativePassPanel /> : <><p className="settings-copy">Pass authorization must happen on 4chan so Safari can store its secure cookie. Once authorized, use “Open official” or “Reply” from 4leaf.</p><a className="secondary wide" href="https://sys.4chan.org/auth" target="_blank" rel="noreferrer">Authorize on 4chan <ExternalLink size={16} /></a></>}</section>
     <p className="fine-print">4leaf uses 4chan’s read-only JSON API. It never receives or stores your Pass token or PIN.</p>
   </aside></>
+}
+
+function NativePassPanel() {
+  const [token, setToken] = useState('')
+  const [pin, setPin] = useState('')
+  const [authorized, setAuthorized] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('Checking authorization…')
+  useEffect(() => { hasAuthorizedPass().then((value) => { setAuthorized(value); setMessage(value ? 'Pass authorized on this device.' : 'Authorize a Pass to post without CAPTCHA.') }) }, [])
+  const submit = async () => {
+    setBusy(true); setMessage('Authorizing…')
+    try {
+      const result = await authorizePass(token, pin)
+      setAuthorized(result.ok); setMessage(result.message)
+      if (result.ok) { setToken(''); setPin('') }
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Authorization failed.') }
+    finally { setBusy(false) }
+  }
+  const disconnect = async () => { await clearPass(); setAuthorized(false); setMessage('Pass removed from this device.') }
+  return <div className="pass-panel">{authorized ? <><div className="installed"><Check /> Pass authorized</div><button className="secondary wide" onClick={disconnect}>Remove Pass</button></> : <><div className="pass-fields"><input autoCapitalize="none" autoCorrect="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="10-character token" /><input inputMode="numeric" type="password" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="6-digit PIN" /></div><button className="primary wide" disabled={busy || !token.trim() || !pin.trim()} onClick={submit}>{busy ? 'Authorizing…' : 'Authorize Pass'}</button></>}<p className="settings-copy">{message} Credentials are sent directly to 4chan and are never saved by 4leaf.</p></div>
 }
 
 function Logo() { return <span className="logo"><svg viewBox="0 0 100 100" aria-hidden="true"><path d="M47 48C16 50 7 23 26 13 43 5 52 25 51 45Z"/><path d="M53 48C84 50 93 23 74 13 57 5 48 25 49 45Z"/><path d="M47 53C16 50 7 77 26 87 43 95 52 75 51 55Z"/><path d="M53 53C84 50 93 77 74 87 57 95 48 75 49 55Z"/><path d="m48 52 9 40 6-3-10-39Z"/></svg></span> }

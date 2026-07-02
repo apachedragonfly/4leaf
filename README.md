@@ -31,7 +31,23 @@ The deployed site must use HTTPS. Open it in Safari, tap **Share**, choose **Add
 
 4chan's JSON API is read-only. Browser security also prevents a PWA on another origin from setting or reading 4chan's secure authentication cookies or CAPTCHA response. For that reason, 4leaf never asks for or stores a Pass token or PIN. Quick Reply keeps the draft locally, supports `>>post` quoting, copies the finished comment, and opens the official thread for attachment, CAPTCHA/Pass handling, and final submission.
 
-A future native wrapper or a separately hosted server could support posting, but that would add credential, CAPTCHA, abuse-prevention, and privacy responsibilities that the static PWA deliberately avoids.
+The Capacitor iOS build uses device-side native HTTP and cookies. Its settings screen can authorize a Pass directly with 4chan, and Quick Reply can submit comments and attachments without leaving 4leaf. The token and PIN are used only for the authorization request and are not persisted by 4leaf; 4chan's resulting cookie is stored in the native cookie store.
+
+## Native iOS build
+
+The generated Xcode project is in `ios/`. Capacitor 8 requires iOS 15 or newer and Xcode 26 or newer.
+
+On a Mac:
+
+```bash
+npm install
+npm run native:sync
+npm run native:open
+```
+
+In Xcode, select the **App** target, choose your Apple Developer team under **Signing & Capabilities**, connect and select your iPhone, then press Run. A free Apple ID can install a development build on a personal device, although it must be periodically re-signed; paid accounts can use TestFlight or normal distribution.
+
+Run `npm run native:sync` after every web-code change before rebuilding in Xcode. Native Pass authorization and posting must be tested on a physical device with the owner's own Pass; no Pass credentials are included in this repository.
 
 ## Deployment
 
