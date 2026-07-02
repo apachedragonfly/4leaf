@@ -150,6 +150,11 @@ main { min-height: calc(100vh - 86px); }
 .gallery-button span { min-width: 20px; padding: 2px 6px; border-radius: 10px; background: var(--surface-2); color: var(--muted); font-size: 10px; }
 .closed-pill { padding: 4px 8px; border-radius: 10px; background: var(--surface-2); }
 .posts { display: flex; flex-direction: column; gap: 10px; }
+.thread-updater { margin: 14px 0 0 auto; padding: 8px 8px 8px 13px; position: sticky; z-index: 10; bottom: max(12px, env(safe-area-inset-bottom)); width: fit-content; display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface) 94%, transparent); box-shadow: var(--shadow); backdrop-filter: blur(10px); color: var(--muted); font-size: 10px; }
+.thread-updater .secondary { min-height: 34px; padding: 0 11px; }
+.thread-updater svg { width: 14px; }
+.spinning { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .post { padding: 18px 20px 21px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); scroll-margin-top: 100px; }
 .post.op { border-left: 4px solid var(--green); padding-left: 18px; }
 .post-head, .post-head > div { display: flex; align-items: center; justify-content: space-between; }
@@ -174,6 +179,9 @@ main { min-height: calc(100vh - 86px); }
 .comment .quote { color: #498659; }
 :root[data-theme='dark'] .comment .quote { color: #78bc89; }
 .post-link { padding: 0; border: 0; background: transparent; color: var(--red); cursor: pointer; font-size: inherit; }
+.post-link:hover { text-decoration: underline; }
+.post-backlinks { clear: both; margin-top: 11px; padding-top: 9px; display: flex; flex-wrap: wrap; align-items: center; gap: 7px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.post-backlinks .post-link { font-weight: 600; }
 
 .media-viewer { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; background: rgba(8, 10, 8, .96); color: white; }
 .media-stage { flex: 1; min-height: 0; padding: 58px 30px 15px; display: grid; place-items: center; }
@@ -303,6 +311,7 @@ main { min-height: calc(100vh - 86px); }
   .post.op { padding-left: 12px; }
   .post-media { width: min(180px, 46%); margin-right: 12px; }
   .comment { font-size: 12.5px; }
+  .thread-updater { max-width: 100%; }
   .welcome > .brand-lockup { position: static; margin-bottom: 28px; }
   .welcome-card { padding: 29px 22px; }
   .welcome-card h1 { font-size: 34px; }

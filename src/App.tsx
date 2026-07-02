@@ -166,27 +166,54 @@ function ThreadCard({ board, post }: { board: string; post: Post }) {
 function Thread({ board, thread, saved, onToggleSaved }: { board: string; thread: number; saved: boolean; onToggleSaved: (item: SavedThread) => void }) {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
+  const [updating, setUpdating] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState('')
   const [error, setError] = useState('')
   const [mediaIndex, setMediaIndex] = useState<number | null>(null)
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [replyOpen, setReplyOpen] = useState(false)
   const [replyQuote, setReplyQuote] = useState<number | null>(null)
-  const load = () => { setLoading(true); setError(''); getThread(board, thread).then(setPosts).catch((e: Error) => setError(e.message)).finally(() => setLoading(false)) }
+  const load = () => {
+    setLoading(true); setError(''); setUpdateStatus('')
+    getThread(board, thread).then(setPosts).catch((e: Error) => setError(e.message)).finally(() => setLoading(false))
+  }
   useEffect(load, [board, thread])
+  const loadNewer = () => {
+    if (updating) return
+    setUpdating(true); setUpdateStatus('')
+    const existing = new Set(posts.map((post) => post.no))
+    getThread(board, thread).then((next) => {
+      const added = next.filter((post) => !existing.has(post.no)).length
+      setPosts(next)
+      setUpdateStatus(added ? `${added} new post${added === 1 ? '' : 's'} loaded.` : 'No new posts.')
+    }).catch((e: Error) => setUpdateStatus(e.message)).finally(() => setUpdating(false))
+  }
   const op = posts[0]
   const media = posts.filter((post) => post.tim && post.ext)
+  const backlinks = useMemo(() => {
+    const knownPosts = new Set(posts.map((post) => post.no))
+    const links = new Map<number, number[]>()
+    posts.forEach((source) => {
+      const targets = new Set(Array.from(htmlToText(source.com).matchAll(/>>(\d+)/g), (match) => Number(match[1])))
+      targets.forEach((target) => {
+        if (!knownPosts.has(target) || target === source.no) return
+        links.set(target, [...(links.get(target) ?? []), source.no])
+      })
+    })
+    return links
+  }, [posts])
   const title = htmlToText(op?.sub) || htmlToText(op?.com).slice(0, 60) || `Thread #${thread}`
   const openReply = (quote?: number) => { setReplyQuote(quote ?? null); setReplyOpen(true) }
   return <div className="content thread-content">
-    <div className="thread-toolbar"><div><span>{posts.length ? `${posts.length} posts` : 'Thread'}</span>{op?.closed === 1 && <span className="closed-pill">Closed</span>}</div><div><button className="secondary gallery-button" disabled={!media.length} onClick={() => setGalleryOpen(true)}><Images size={17} /> Gallery <span>{media.length}</span></button><button className={`icon-button ${saved ? 'selected' : ''}`} disabled={!op} onClick={() => onToggleSaved({ board, no: thread, title, savedAt: Date.now() })} aria-label="Save thread"><Bookmark fill={saved ? 'currentColor' : 'none'} /></button><button className="icon-button" onClick={load} aria-label="Refresh"><RefreshCw /></button><button className="primary" disabled={op?.closed === 1} onClick={() => openReply()}>Reply <MessageCircle size={15} /></button></div></div>
-    {loading ? <ThreadSkeleton /> : error ? <ErrorState message={error} retry={load} /> : <div className="posts">{posts.map((post, index) => <PostView key={post.no} board={board} post={post} op={index === 0} onMedia={() => setMediaIndex(media.findIndex((item) => item.no === post.no))} onReply={() => openReply(post.no)} />)}</div>}
+    <div className="thread-toolbar"><div><span>{posts.length ? `${posts.length} posts` : 'Thread'}</span>{op?.closed === 1 && <span className="closed-pill">Closed</span>}</div><div><button className="secondary gallery-button" disabled={!media.length} onClick={() => setGalleryOpen(true)}><Images size={17} /> Gallery <span>{media.length}</span></button><button className={`icon-button ${saved ? 'selected' : ''}`} disabled={!op} onClick={() => onToggleSaved({ board, no: thread, title, savedAt: Date.now() })} aria-label="Save thread"><Bookmark fill={saved ? 'currentColor' : 'none'} /></button><button className="icon-button" disabled={updating} onClick={loadNewer} aria-label="Load newer posts"><RefreshCw className={updating ? 'spinning' : ''} /></button><button className="primary" disabled={op?.closed === 1} onClick={() => openReply()}>Reply <MessageCircle size={15} /></button></div></div>
+    {loading ? <ThreadSkeleton /> : error ? <ErrorState message={error} retry={load} /> : <><div className="posts">{posts.map((post, index) => <PostView key={post.no} board={board} post={post} op={index === 0} backlinks={backlinks.get(post.no) ?? []} onMedia={() => setMediaIndex(media.findIndex((item) => item.no === post.no))} onReply={() => openReply(post.no)} />)}</div><div className="thread-updater" aria-live="polite"><span>{updateStatus || `${posts.length} posts loaded`}</span><button className="secondary" disabled={updating} onClick={loadNewer}><RefreshCw className={updating ? 'spinning' : ''} /> {updating ? 'Checking…' : 'Load newer posts'}</button></div></>}
     {galleryOpen && <MediaGallery board={board} posts={media} onClose={() => setGalleryOpen(false)} onSelect={(index) => { setGalleryOpen(false); setMediaIndex(index) }} />}
     {mediaIndex !== null && <MediaViewer board={board} posts={media} index={mediaIndex} onIndex={setMediaIndex} onClose={() => setMediaIndex(null)} />}
-    {replyOpen && <ReplyComposer key={`${board}/${thread}/${replyQuote ?? 'thread'}`} board={board} thread={thread} quote={replyQuote} onClose={() => setReplyOpen(false)} onPosted={() => { setReplyOpen(false); setTimeout(load, 1200) }} />}
+    {replyOpen && <ReplyComposer key={`${board}/${thread}/${replyQuote ?? 'thread'}`} board={board} thread={thread} quote={replyQuote} onClose={() => setReplyOpen(false)} onPosted={() => { setReplyOpen(false); setTimeout(loadNewer, 1200) }} />}
   </div>
 }
 
-function PostView({ board, post, op, onMedia, onReply }: { board: string; post: Post; op: boolean; onMedia: () => void; onReply: () => void }) {
+function PostView({ board, post, op, backlinks, onMedia, onReply }: { board: string; post: Post; op: boolean; backlinks: number[]; onMedia: () => void; onReply: () => void }) {
   const thumb = thumbnailUrl(board, post)
   const text = htmlToText(post.com)
   return <article className={`post ${op ? 'op' : ''}`} id={`p${post.no}`}>
@@ -196,11 +223,16 @@ function PostView({ board, post, op, onMedia, onReply }: { board: string; post: 
       {thumb && <button className="post-media" onClick={onMedia}><img src={thumb} alt={post.filename || 'Attached media'} loading="lazy" referrerPolicy="no-referrer" /><span>{post.ext?.slice(1).toUpperCase()} · {formatBytes(post.fsize)}{post.w && ` · ${post.w}×${post.h}`}</span>{post.ext === '.webm' && <span className="play">▶</span>}</button>}
       <Comment text={text} />
     </div>
+    {backlinks.length > 0 && <div className="post-backlinks"><span>Replies:</span>{backlinks.map((reply) => <button key={reply} className="post-link" onClick={() => scrollToPost(reply)}>&gt;&gt;{reply}</button>)}</div>}
   </article>
 }
 
+function scrollToPost(post: number) {
+  document.getElementById(`p${post}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 function Comment({ text }: { text: string }) {
-  return <div className="comment">{text.split('\n').map((line, i) => <p key={i} className={line.startsWith('>') && !line.startsWith('>>') ? 'quote' : ''}>{line.split(/(>>\d+)/g).map((part, j) => part.match(/^>>\d+$/) ? <button key={j} className="post-link" onClick={() => document.getElementById(`p${part.slice(2)}`)?.scrollIntoView({ behavior: 'smooth' })}>{part}</button> : part)}</p>)}</div>
+  return <div className="comment">{text.split('\n').map((line, i) => <p key={i} className={line.startsWith('>') && !line.startsWith('>>') ? 'quote' : ''}>{line.split(/(>>\d+)/g).map((part, j) => part.match(/^>>\d+$/) ? <button key={j} className="post-link" onClick={() => scrollToPost(Number(part.slice(2)))}>{part}</button> : part)}</p>)}</div>
 }
 
 function MediaViewer({ board, posts, index, onIndex, onClose }: { board: string; posts: Post[]; index: number; onIndex: (index: number) => void; onClose: () => void }) {
