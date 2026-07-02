@@ -37,6 +37,14 @@ A future native wrapper or a separately hosted server could support posting, but
 
 4chan restricts browser access to its JSON API with CORS, so 4leaf needs the small read-only proxy in `functions/api/4chan/`. Cloudflare Pages runs this function on the same origin as the app and caches upstream responses. It only permits the board list, catalog, and thread JSON paths; it cannot proxy arbitrary URLs.
 
+### Vercel
+
+Vercel uses the equivalent function in `api/4chan/[...path].js`. Import the repository into Vercel and leave the detected Vite settings in place; `vercel.json` fixes the build command and output directory. Every push to the connected production branch triggers a new deployment.
+
+After deployment, verify that `https://YOUR-DOMAIN/api/4chan/boards.json` returns JSON before opening the app. If it returns HTML or a 404, confirm that the Vercel project root is the repository root and redeploy without the build cache.
+
+### Cloudflare Pages
+
 To deploy with Cloudflare Pages:
 
 1. Import this GitHub repository as a Pages project.
