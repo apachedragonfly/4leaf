@@ -1,5 +1,4 @@
 interface PagesContext {
-  params: { path?: string | string[] }
   request: Request
   waitUntil(promise: Promise<unknown>): void
 }
@@ -17,9 +16,8 @@ export async function onRequest(context: PagesContext): Promise<Response> {
     return json({ error: 'Method not allowed.' }, 405, 0)
   }
 
-  const value = context.params.path
-  const path = Array.isArray(value) ? value.join('/') : (value ?? '')
-
+  const value = new URL(context.request.url).searchParams.get('path') ?? ''
+  const path = value.replace(/^\/+/, '')
   if (!ALLOWED_PATHS.some((pattern) => pattern.test(path))) {
     return json({ error: 'Unsupported API path.' }, 400, 60)
   }

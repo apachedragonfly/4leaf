@@ -9,7 +9,11 @@ export default defineConfig({
       '/api/4chan': {
         target: 'https://a.4cdn.org',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/4chan/, '')
+        rewrite: (requestPath) => {
+          const url = new URL(requestPath, 'http://4leaf.local')
+          const path = url.searchParams.get('path') ?? ''
+          return path.startsWith('/') ? path : `/${path}`
+        }
       }
     }
   },
@@ -38,7 +42,7 @@ export default defineConfig({
         navigateFallback: '/index.html',
         runtimeCaching: [
           {
-            urlPattern: /\/api\/4chan\//i,
+            urlPattern: /\/api\/4chan(?:\?|$)/i,
             handler: 'NetworkFirst',
             options: { cacheName: '4leaf-api', expiration: { maxEntries: 80, maxAgeSeconds: 1800 } }
           },

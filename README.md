@@ -39,9 +39,9 @@ A future native wrapper or a separately hosted server could support posting, but
 
 ### Vercel
 
-Vercel uses the equivalent function in `api/4chan/[...path].js`. Import the repository into Vercel and leave the detected Vite settings in place; `vercel.json` fixes the build command and output directory. Every push to the connected production branch triggers a new deployment.
+Vercel uses the equivalent function in `api/4chan.js`. Import the repository into Vercel and leave the detected Vite settings in place; `vercel.json` fixes the build command and output directory. Every push to the connected production branch triggers a new deployment.
 
-After deployment, verify that `https://YOUR-DOMAIN/api/4chan/boards.json` returns JSON before opening the app. If it returns HTML or a 404, confirm that the Vercel project root is the repository root and redeploy without the build cache.
+After deployment, verify that `https://YOUR-DOMAIN/api/4chan?path=/boards.json` returns JSON before opening the app. If it returns HTML or a 404, confirm that the Vercel project root is the repository root and redeploy without the build cache.
 
 ### Cloudflare Pages
 

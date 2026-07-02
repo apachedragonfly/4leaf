@@ -10,7 +10,7 @@ export default async function handler(request, response) {
   }
 
   const value = request.query.path
-  const path = Array.isArray(value) ? value.join('/') : (value ?? '')
+  const path = (Array.isArray(value) ? value[0] : (value ?? '')).replace(/^\/+/, '')
   if (!ALLOWED_PATHS.some((pattern) => pattern.test(path))) {
     return response.status(400).json({ error: 'Unsupported API path.' })
   }

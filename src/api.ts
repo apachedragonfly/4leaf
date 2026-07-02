@@ -4,7 +4,7 @@ const API = `${import.meta.env.BASE_URL}api/4chan`
 const MEDIA = 'https://i.4cdn.org'
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(`${API}${path}`, { signal })
+  const response = await fetch(`${API}?path=${encodeURIComponent(path)}`, { signal })
   if (!response.ok) throw new Error(response.status === 404 ? 'This thread has expired.' : `4chan returned ${response.status}.`)
   return response.json() as Promise<T>
 }
