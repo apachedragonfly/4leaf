@@ -43,9 +43,13 @@ export default defineConfig({
             options: { cacheName: '4leaf-api', expiration: { maxEntries: 80, maxAgeSeconds: 1800 } }
           },
           {
-            urlPattern: /^https:\/\/i\.4cdn\.org\//i,
+            urlPattern: /^https:\/\/i\.4cdn\.org\/[a-z0-9]+\/\d+s\.jpg$/i,
             handler: 'CacheFirst',
-            options: { cacheName: '4leaf-media', expiration: { maxEntries: 250, maxAgeSeconds: 604800 } }
+            options: {
+              cacheName: '4leaf-thumbnails',
+              cacheableResponse: { statuses: [0, 200] },
+              expiration: { maxEntries: 250, maxAgeSeconds: 604800 }
+            }
           }
         ]
       }

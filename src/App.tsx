@@ -161,7 +161,7 @@ function Catalog({ board, info, favorite, onToggleFavorite }: { board: string; i
 function ThreadCard({ board, post }: { board: string; post: Post }) {
   const thumb = thumbnailUrl(board, post)
   return <article className="thread-card" onClick={() => navigate(board, post.no)}>
-    <div className="thread-thumb">{thumb ? <img src={thumb} alt="" loading="lazy" /> : <ImageIcon />}{post.ext === '.webm' && <span className="media-badge">WEBM</span>}{post.sticky === 1 && <span className="sticky-badge">Pinned</span>}</div>
+    <div className="thread-thumb">{thumb ? <img src={thumb} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <ImageIcon />}{post.ext === '.webm' && <span className="media-badge">WEBM</span>}{post.sticky === 1 && <span className="sticky-badge">Pinned</span>}</div>
     <div className="thread-card-body"><div className="thread-meta"><span>{timeAgo(post.time)} ago</span><span><MessageCircle size={13} /> {post.replies ?? 0}</span><span><ImageIcon size={13} /> {post.images ?? 0}</span></div><h3>{htmlToText(post.sub) || `Thread #${post.no}`}</h3><p>{htmlToText(post.com) || 'No comment.'}</p></div>
   </article>
 }
@@ -196,7 +196,7 @@ function PostView({ board, post, op, onMedia, onReply }: { board: string; post: 
     <div className="post-head"><div><span className="avatar">{(post.name || 'A')[0]}</span><div><strong>{post.name || 'Anonymous'}{post.trip && <small> {post.trip}</small>}</strong><span>{post.now} · No.{post.no}</span></div></div><button className="post-reply-button" onClick={onReply}><MessageCircle /> Reply</button></div>
     {post.sub && <h3 className="post-subject">{htmlToText(post.sub)}</h3>}
     <div className={`post-content ${thumb ? 'has-media' : ''}`}>
-      {thumb && <button className="post-media" onClick={onMedia}><img src={thumb} alt={post.filename || 'Attached media'} loading="lazy" /><span>{post.ext?.slice(1).toUpperCase()} · {formatBytes(post.fsize)}{post.w && ` · ${post.w}×${post.h}`}</span>{post.ext === '.webm' && <span className="play">▶</span>}</button>}
+      {thumb && <button className="post-media" onClick={onMedia}><img src={thumb} alt={post.filename || 'Attached media'} loading="lazy" referrerPolicy="no-referrer" /><span>{post.ext?.slice(1).toUpperCase()} · {formatBytes(post.fsize)}{post.w && ` · ${post.w}×${post.h}`}</span>{post.ext === '.webm' && <span className="play">▶</span>}</button>}
       <Comment text={text} />
     </div>
   </article>
@@ -212,11 +212,11 @@ function MediaViewer({ board, posts, index, onIndex, onClose }: { board: string;
   const previous = () => onIndex((index - 1 + posts.length) % posts.length)
   const next = () => onIndex((index + 1) % posts.length)
   useEffect(() => { const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); if (e.key === 'ArrowLeft') previous(); if (e.key === 'ArrowRight') next() }; addEventListener('keydown', key); return () => removeEventListener('keydown', key) })
-  return <div className="media-viewer" role="dialog" aria-modal="true"><button className="media-close" onClick={onClose}><X /></button>{posts.length > 1 && <><button className="media-nav previous" onClick={previous} aria-label="Previous media"><ChevronLeft /></button><button className="media-nav next" onClick={next} aria-label="Next media"><ChevronRight /></button></>}<div className="media-stage" onClick={onClose}>{post.ext === '.webm' ? <video key={url} src={url} controls autoPlay playsInline loop onClick={(e) => e.stopPropagation()} /> : <img src={url} alt={post.filename || 'Full-size media'} onClick={(e) => e.stopPropagation()} />}</div><div className="media-caption"><strong>{post.filename}{post.ext}</strong><span>{formatBytes(post.fsize)} · {post.w}×{post.h}</span><em>{index + 1} / {posts.length}</em></div></div>
+  return <div className="media-viewer" role="dialog" aria-modal="true"><button className="media-close" onClick={onClose}><X /></button>{posts.length > 1 && <><button className="media-nav previous" onClick={previous} aria-label="Previous media"><ChevronLeft /></button><button className="media-nav next" onClick={next} aria-label="Next media"><ChevronRight /></button></>}<div className="media-stage" onClick={onClose}>{post.ext === '.webm' ? <video key={url} src={url} controls autoPlay playsInline loop onClick={(e) => e.stopPropagation()} /> : <img src={url} alt={post.filename || 'Full-size media'} referrerPolicy="no-referrer" onClick={(e) => e.stopPropagation()} />}</div><div className="media-caption"><strong>{post.filename}{post.ext}</strong><span>{formatBytes(post.fsize)} · {post.w}×{post.h}</span><em>{index + 1} / {posts.length}</em></div></div>
 }
 
 function MediaGallery({ board, posts, onSelect, onClose }: { board: string; posts: Post[]; onSelect: (index: number) => void; onClose: () => void }) {
-  return <div className="gallery-view" role="dialog" aria-modal="true"><header><div><span className="eyebrow">/{board}/ thread media</span><h2>Gallery</h2></div><div><span>{posts.length} files</span><button className="icon-button" onClick={onClose}><X /></button></div></header><div className="gallery-grid">{posts.map((post, index) => <button key={post.no} onClick={() => onSelect(index)}><img src={thumbnailUrl(board, post)!} alt={post.filename || `Post ${post.no}`} loading="lazy" /><span>{post.ext?.slice(1).toUpperCase()} · No.{post.no}</span>{post.ext === '.webm' && <i>▶</i>}</button>)}</div></div>
+  return <div className="gallery-view" role="dialog" aria-modal="true"><header><div><span className="eyebrow">/{board}/ thread media</span><h2>Gallery</h2></div><div><span>{posts.length} files</span><button className="icon-button" onClick={onClose}><X /></button></div></header><div className="gallery-grid">{posts.map((post, index) => <button key={post.no} onClick={() => onSelect(index)}><img src={post.ext === '.webm' ? thumbnailUrl(board, post)! : mediaUrl(board, post)!} alt={post.filename || `Post ${post.no}`} loading="lazy" decoding="async" referrerPolicy="no-referrer" /><span>{post.ext?.slice(1).toUpperCase()} · No.{post.no}</span>{post.ext === '.webm' && <i>▶</i>}</button>)}</div></div>
 }
 
 function ReplyComposer({ board, thread, quote, onClose }: { board: string; thread: number; quote: number | null; onClose: () => void }) {

@@ -200,7 +200,7 @@ main { min-height: calc(100vh - 86px); }
 .gallery-view header > div:last-child { display: flex; align-items: center; gap: 13px; color: var(--muted); font-size: 11px; }
 .gallery-grid { width: min(1200px, 100%); margin: 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
 .gallery-grid button { aspect-ratio: 1; padding: 0; position: relative; border: 0; border-radius: 10px; overflow: hidden; background: var(--surface-2); cursor: zoom-in; }
-.gallery-grid img { width: 100%; height: 100%; display: block; object-fit: cover; transition: transform .25s, filter .25s; }
+.gallery-grid img { width: 100%; height: 100%; display: block; object-fit: contain; transition: transform .25s, filter .25s; }
 .gallery-grid button:hover img { transform: scale(1.035); filter: brightness(.85); }
 .gallery-grid button > span { position: absolute; inset: auto 7px 7px; padding: 5px 7px; border-radius: 5px; background: rgba(8,10,8,.72); color: white; font-size: 9px; text-align: left; }
 .gallery-grid button > i { position: absolute; inset: 50% auto auto 50%; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; background: rgba(8,10,8,.72); color: white; font-size: 12px; font-style: normal; transform: translate(-50%, -50%); }
