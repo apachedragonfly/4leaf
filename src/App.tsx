@@ -186,6 +186,7 @@ function Thread({ board, thread, saved, onToggleSaved }: { board: string; thread
       const added = next.filter((post) => !existing.has(post.no)).length
       setPosts(next)
       setUpdateStatus(added ? `${added} new post${added === 1 ? '' : 's'} loaded.` : 'No new posts.')
+      if (added) requestAnimationFrame(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' }))
     }).catch((e: Error) => setUpdateStatus(e.message)).finally(() => setUpdating(false))
   }
   const op = posts[0]
