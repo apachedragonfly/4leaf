@@ -25,7 +25,7 @@ Use `npm run build` to type-check and create the production PWA in `dist/`.
 
 ## Install on iOS
 
-The deployed site must use HTTPS. Open it in Safari, tap **Share**, choose **Add to Home Screen**, then confirm. WebM media uses Safari's native video element with inline playback enabled.
+The deployed site must use HTTPS. Open it in Safari, tap **Share**, choose **Add to Home Screen**, then confirm. WebM and MP4 media use Safari's native video element with inline playback enabled.
 
 ## 4chan Pass and posting
 

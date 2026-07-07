@@ -172,7 +172,7 @@ function Catalog({ board, info, favorite, onToggleFavorite }: { board: string; i
 function ThreadCard({ board, post }: { board: string; post: Post }) {
   const thumb = thumbnailUrl(board, post)
   return <button className="thread-card" onClick={() => navigate(board, post.no)} aria-label={`Open ${htmlToText(post.sub) || `thread ${post.no}`}`}>
-    <div className="thread-thumb">{thumb ? <img src={thumb} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <ImageIcon />}{post.ext === '.webm' && <span className="media-badge">WEBM</span>}{post.sticky === 1 && <span className="sticky-badge">Pinned</span>}</div>
+    <div className="thread-thumb">{thumb ? <img src={thumb} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <ImageIcon />}{isVideo(post.ext) && <span className="media-badge">{post.ext?.slice(1).toUpperCase()}</span>}{post.sticky === 1 && <span className="sticky-badge">Pinned</span>}</div>
     <div className="thread-card-body"><div className="thread-meta"><span>{timeAgo(post.time)} ago</span><span><MessageCircle size={13} /> {post.replies ?? 0}</span><span><ImageIcon size={13} /> {post.images ?? 0}</span></div><h3>{htmlToText(post.sub) || `Thread #${post.no}`}</h3><p>{htmlToText(post.com) || 'No comment.'}</p></div>
   </button>
 }
@@ -246,7 +246,7 @@ function PostView({ board, post, op, backlinks, onMedia, onReply }: { board: str
     <div className="post-head"><div><span className="avatar">{(post.name || 'A')[0]}</span><div><strong>{post.name || 'Anonymous'}{post.trip && <small> {post.trip}</small>}</strong><span>{post.now} · No.{post.no}</span></div></div><button className="post-reply-button" onClick={onReply}><MessageCircle /> Reply</button></div>
     {post.sub && <h3 className="post-subject">{htmlToText(post.sub)}</h3>}
     <div className={`post-content ${thumb ? 'has-media' : ''}`}>
-      {thumb && <button className="post-media" onClick={onMedia} aria-label={`Open ${post.filename || 'attached media'}`}><img src={thumb} alt="" loading="lazy" referrerPolicy="no-referrer" /><span>{post.ext?.slice(1).toUpperCase()} · {formatBytes(post.fsize)}{post.w && ` · ${post.w}×${post.h}`}</span>{post.ext === '.webm' && <span className="play">▶</span>}</button>}
+      {thumb && <button className="post-media" onClick={onMedia} aria-label={`Open ${post.filename || 'attached media'}`}><img src={thumb} alt="" loading="lazy" referrerPolicy="no-referrer" /><span>{post.ext?.slice(1).toUpperCase()} · {formatBytes(post.fsize)}{post.w && ` · ${post.w}×${post.h}`}</span>{isVideo(post.ext) && <span className="play">▶</span>}</button>}
       <Comment text={text} />
     </div>
     {backlinks.length > 0 && <div className="post-backlinks"><span>Replies:</span>{backlinks.map((reply) => <button key={reply} className="post-link" onClick={() => scrollToPost(reply)}>&gt;&gt;{reply}</button>)}</div>}
@@ -263,17 +263,31 @@ function Comment({ text }: { text: string }) {
 
 function MediaViewer({ board, posts, index, onIndex, onClose }: { board: string; posts: Post[]; index: number; onIndex: (index: number) => void; onClose: () => void }) {
   const dialogRef = useDialogAccessibility<HTMLDivElement>(onClose)
+  const touchStart = useRef<{ x: number; y: number } | null>(null)
+  const suppressClick = useRef(false)
   const post = posts[index]
   const url = mediaUrl(board, post)!
   const previous = () => onIndex((index - 1 + posts.length) % posts.length)
   const next = () => onIndex((index + 1) % posts.length)
+  const finishSwipe = (event: React.TouchEvent) => {
+    const start = touchStart.current
+    touchStart.current = null
+    if (!start || posts.length < 2) return
+    const touch = event.changedTouches[0]
+    const deltaX = touch.clientX - start.x
+    const deltaY = touch.clientY - start.y
+    if (Math.abs(deltaX) < 50 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.25) return
+    suppressClick.current = true
+    if (deltaX < 0) next()
+    else previous()
+  }
   useEffect(() => { const key = (e: KeyboardEvent) => { if (e.key === 'ArrowLeft') previous(); if (e.key === 'ArrowRight') next() }; addEventListener('keydown', key); return () => removeEventListener('keydown', key) })
-  return <div ref={dialogRef} className="media-viewer" role="dialog" aria-modal="true" aria-label="Media viewer" tabIndex={-1}><button className="media-close" onClick={onClose} aria-label="Close media viewer"><X /></button>{posts.length > 1 && <><button className="media-nav previous" onClick={previous} aria-label="Previous media"><ChevronLeft /></button><button className="media-nav next" onClick={next} aria-label="Next media"><ChevronRight /></button></>}<div className="media-stage" onClick={onClose}>{post.ext === '.webm' ? <video key={url} src={url} controls autoPlay playsInline loop onClick={(e) => e.stopPropagation()} /> : <img src={url} alt={post.filename || 'Full-size media'} referrerPolicy="no-referrer" onClick={(e) => e.stopPropagation()} />}</div><div className="media-caption"><strong>{post.filename}{post.ext}</strong><span>{formatBytes(post.fsize)} · {post.w}×{post.h}</span><em>{index + 1} / {posts.length}</em></div></div>
+  return <div ref={dialogRef} className="media-viewer" role="dialog" aria-modal="true" aria-label="Media viewer" tabIndex={-1}><button className="media-close" onClick={onClose} aria-label="Close media viewer"><X /></button>{posts.length > 1 && <><button className="media-nav previous" onClick={previous} aria-label="Previous media"><ChevronLeft /></button><button className="media-nav next" onClick={next} aria-label="Next media"><ChevronRight /></button></>}<div className="media-stage" onTouchStart={(event) => { const touch = event.touches[0]; touchStart.current = { x: touch.clientX, y: touch.clientY } }} onTouchEnd={finishSwipe} onTouchCancel={() => { touchStart.current = null }} onClickCapture={(event) => { if (suppressClick.current) { suppressClick.current = false; event.preventDefault(); event.stopPropagation() } }} onClick={onClose}>{isVideo(post.ext) ? <video key={url} src={url} controls autoPlay playsInline loop onClick={(e) => e.stopPropagation()} /> : <img src={url} alt={post.filename || 'Full-size media'} referrerPolicy="no-referrer" onClick={(e) => e.stopPropagation()} />}</div><div className="media-caption"><strong>{post.filename}{post.ext}</strong><span>{formatBytes(post.fsize)} · {post.w}×{post.h}</span><em>{index + 1} / {posts.length}</em></div></div>
 }
 
 function MediaGallery({ board, posts, onSelect, onClose }: { board: string; posts: Post[]; onSelect: (index: number) => void; onClose: () => void }) {
   const dialogRef = useDialogAccessibility<HTMLDivElement>(onClose)
-  return <div ref={dialogRef} className="gallery-view" role="dialog" aria-modal="true" aria-labelledby="gallery-title" tabIndex={-1}><header><div><span className="eyebrow">/{board}/ thread media</span><h2 id="gallery-title">Gallery</h2></div><div><span>{posts.length} files</span><button className="icon-button" onClick={onClose} aria-label="Close gallery"><X /></button></div></header><div className="gallery-grid">{posts.map((post, index) => <button key={post.no} onClick={() => onSelect(index)} aria-label={`Open ${post.filename || `media from post ${post.no}`}`}><img src={thumbnailUrl(board, post)!} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" /><span>{post.ext?.slice(1).toUpperCase()} · No.{post.no}</span>{post.ext === '.webm' && <i>▶</i>}</button>)}</div></div>
+  return <div ref={dialogRef} className="gallery-view" role="dialog" aria-modal="true" aria-labelledby="gallery-title" tabIndex={-1}><header><div><span className="eyebrow">/{board}/ thread media</span><h2 id="gallery-title">Gallery</h2></div><div><span>{posts.length} files</span><button className="icon-button" onClick={onClose} aria-label="Close gallery"><X /></button></div></header><div className="gallery-grid">{posts.map((post, index) => <button key={post.no} onClick={() => onSelect(index)} aria-label={`Open ${post.filename || `media from post ${post.no}`}`}><img src={thumbnailUrl(board, post)!} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" /><span>{post.ext?.slice(1).toUpperCase()} · No.{post.no}</span>{isVideo(post.ext) && <i>▶</i>}</button>)}</div></div>
 }
 
 function ReplyComposer({ board, thread, quote, onClose, onPosted }: { board: string; thread: number; quote: number | null; onClose: () => void; onPosted: () => void }) {
@@ -391,6 +405,7 @@ function useDialogAccessibility<T extends HTMLElement>(onClose: () => void) {
 }
 
 function Logo() { return <span className="logo"><svg viewBox="0 0 100 100" aria-hidden="true"><path d="M47 48C16 50 7 23 26 13 43 5 52 25 51 45Z"/><path d="M53 48C84 50 93 23 74 13 57 5 48 25 49 45Z"/><path d="M47 53C16 50 7 77 26 87 43 95 52 75 51 55Z"/><path d="M53 53C84 50 93 77 74 87 57 95 48 75 49 55Z"/><path d="m48 52 9 40 6-3-10-39Z"/></svg></span> }
+function isVideo(ext?: string) { return ext === '.webm' || ext === '.mp4' }
 function SectionHeading({ title, action }: { title: string; action: string }) { return <div className="section-heading"><h2>{title}</h2><span>{action}</span></div> }
 function LoadingCards() { return <div className="board-grid">{Array.from({ length: 12 }, (_, i) => <div className="board-card skeleton" key={i} />)}</div> }
 function LoadingCatalog() { return <div className="catalog-grid">{Array.from({ length: 12 }, (_, i) => <div className="thread-card skeleton" key={i} />)}</div> }
