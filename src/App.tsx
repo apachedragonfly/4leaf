@@ -185,6 +185,7 @@ function Thread({ board, thread, saved, onToggleSaved }: { board: string; thread
   const [error, setError] = useState('')
   const [mediaIndex, setMediaIndex] = useState<number | null>(null)
   const [galleryOpen, setGalleryOpen] = useState(false)
+  const [postPreview, setPostPreview] = useState<{ post: Post; left: number; top: number } | null>(null)
   const [replyOpen, setReplyOpen] = useState(false)
   const [replyQuote, setReplyQuote] = useState<number | null>(null)
   const [requestVersion, setRequestVersion] = useState(0)
@@ -230,6 +231,16 @@ function Thread({ board, thread, saved, onToggleSaved }: { board: string; thread
   }, [posts])
   const title = htmlToText(op?.sub) || htmlToText(op?.com).slice(0, 60) || `Thread #${thread}`
   const openReply = (quote?: number) => { setReplyQuote(quote ?? null); setReplyOpen(true) }
+  const openPostPreview = (postNumber: number, anchor: HTMLElement) => {
+    const referencedPost = posts.find((item) => item.no === postNumber)
+    if (!referencedPost) return
+    const rect = anchor.getBoundingClientRect()
+    const width = Math.min(420, window.innerWidth - 24)
+    const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))
+    const estimatedHeight = Math.min(360, window.innerHeight - 24)
+    const top = rect.bottom + 8 + estimatedHeight <= window.innerHeight ? rect.bottom + 8 : Math.max(12, rect.top - estimatedHeight - 8)
+    setPostPreview({ post: referencedPost, left, top })
+  }
   const closeMedia = () => {
     const postNumber = mediaIndex === null ? null : media[mediaIndex]?.no
     setMediaIndex(null)
@@ -237,14 +248,15 @@ function Thread({ board, thread, saved, onToggleSaved }: { board: string; thread
   }
   return <div className="content thread-content">
     <div className="thread-toolbar"><div><span>{posts.length ? `${posts.length} posts` : 'Thread'}</span>{op?.closed === 1 && <span className="closed-pill">Closed</span>}</div><div><button className="secondary gallery-button" disabled={!media.length} onClick={() => setGalleryOpen(true)}><Images size={17} /> Gallery <span>{media.length}</span></button><button className={`icon-button ${saved ? 'selected' : ''}`} disabled={!op} onClick={() => onToggleSaved({ board, no: thread, title, savedAt: Date.now() })} aria-label="Save thread"><Bookmark fill={saved ? 'currentColor' : 'none'} /></button><button className="icon-button" disabled={loading || updating} onClick={loadNewer} aria-label="Load newer posts"><RefreshCw className={updating ? 'spinning' : ''} /></button><button className="primary" disabled={op?.closed === 1} onClick={() => openReply()}>Reply <MessageCircle size={15} /></button></div></div>
-    {loading ? <ThreadSkeleton /> : error ? <ErrorState message={error} retry={load} /> : <><div className="posts">{posts.map((post, index) => <PostView key={post.no} board={board} post={post} op={index === 0} backlinks={backlinks.get(post.no) ?? []} onMedia={() => setMediaIndex(media.findIndex((item) => item.no === post.no))} onReply={() => openReply(post.no)} />)}</div><div className="thread-updater" aria-live="polite"><span>{updateStatus || `${posts.length} posts loaded`}</span><button className="secondary" disabled={updating} onClick={loadNewer}><RefreshCw className={updating ? 'spinning' : ''} /> {updating ? 'Checking…' : 'Load newer posts'}</button></div></>}
+    {loading ? <ThreadSkeleton /> : error ? <ErrorState message={error} retry={load} /> : <><div className="posts">{posts.map((post, index) => <PostView key={post.no} board={board} post={post} op={index === 0} backlinks={backlinks.get(post.no) ?? []} onMedia={() => setMediaIndex(media.findIndex((item) => item.no === post.no))} onReply={() => openReply(post.no)} onPostLink={openPostPreview} />)}</div><div className="thread-updater" aria-live="polite"><span>{updateStatus || `${posts.length} posts loaded`}</span><button className="secondary" disabled={updating} onClick={loadNewer}><RefreshCw className={updating ? 'spinning' : ''} /> {updating ? 'Checking…' : 'Load newer posts'}</button></div></>}
+    {postPreview && <PostPreview board={board} preview={postPreview} onClose={() => setPostPreview(null)} onOpen={() => { const postNumber = postPreview.post.no; setPostPreview(null); requestAnimationFrame(() => scrollToPost(postNumber)) }} />}
     {galleryOpen && <MediaGallery board={board} posts={media} onClose={() => setGalleryOpen(false)} onSelect={(index) => { setGalleryOpen(false); setMediaIndex(index) }} />}
     {mediaIndex !== null && <MediaViewer board={board} posts={media} index={mediaIndex} onIndex={setMediaIndex} onClose={closeMedia} />}
     {replyOpen && <ReplyComposer key={`${board}/${thread}/${replyQuote ?? 'thread'}`} board={board} thread={thread} quote={replyQuote} onClose={() => setReplyOpen(false)} onPosted={() => { setReplyOpen(false); setTimeout(loadNewer, 1200) }} />}
   </div>
 }
 
-function PostView({ board, post, op, backlinks, onMedia, onReply }: { board: string; post: Post; op: boolean; backlinks: number[]; onMedia: () => void; onReply: () => void }) {
+function PostView({ board, post, op, backlinks, onMedia, onReply, onPostLink }: { board: string; post: Post; op: boolean; backlinks: number[]; onMedia: () => void; onReply: () => void; onPostLink: (post: number, anchor: HTMLElement) => void }) {
   const thumb = thumbnailUrl(board, post)
   const text = htmlToText(post.com)
   return <article className={`post ${op ? 'op' : ''}`} id={`p${post.no}`}>
@@ -252,9 +264,9 @@ function PostView({ board, post, op, backlinks, onMedia, onReply }: { board: str
     {post.sub && <h3 className="post-subject">{htmlToText(post.sub)}</h3>}
     <div className={`post-content ${thumb ? 'has-media' : ''}`}>
       {thumb && <button className="post-media" onClick={onMedia} aria-label={`Open ${post.filename || 'attached media'}`}><img src={thumb} alt="" loading="lazy" referrerPolicy="no-referrer" /><span>{post.ext?.slice(1).toUpperCase()} · {formatBytes(post.fsize)}{post.w && ` · ${post.w}×${post.h}`}</span>{isVideo(post.ext) && <span className="play">▶</span>}</button>}
-      <Comment text={text} />
+      <Comment text={text} onPostLink={onPostLink} />
     </div>
-    {backlinks.length > 0 && <div className="post-backlinks"><span>Replies:</span>{backlinks.map((reply) => <button key={reply} className="post-link" onClick={() => scrollToPost(reply)}>&gt;&gt;{reply}</button>)}</div>}
+    {backlinks.length > 0 && <div className="post-backlinks"><span>Replies:</span>{backlinks.map((reply) => <button key={reply} className="post-link" onClick={(event) => onPostLink(reply, event.currentTarget)}>&gt;&gt;{reply}</button>)}</div>}
   </article>
 }
 
@@ -262,8 +274,33 @@ function scrollToPost(post: number) {
   document.getElementById(`p${post}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-function Comment({ text }: { text: string }) {
-  return <div className="comment">{text.split('\n').map((line, i) => <p key={i} className={line.startsWith('>') && !line.startsWith('>>') ? 'quote' : ''}>{line.split(/(>>\d+)/g).map((part, j) => part.match(/^>>\d+$/) ? <button key={j} className="post-link" onClick={() => scrollToPost(Number(part.slice(2)))}>{part}</button> : part)}</p>)}</div>
+function Comment({ text, onPostLink }: { text: string; onPostLink: (post: number, anchor: HTMLElement) => void }) {
+  return <div className="comment">{text.split('\n').map((line, i) => <p key={i} className={line.startsWith('>') && !line.startsWith('>>') ? 'quote' : ''}>{line.split(/(>>\d+)/g).map((part, j) => part.match(/^>>\d+$/) ? <button key={j} className="post-link" onClick={(event) => onPostLink(Number(part.slice(2)), event.currentTarget)}>{part}</button> : part)}</p>)}</div>
+}
+
+function PostPreview({ board, preview, onClose, onOpen }: { board: string; preview: { post: Post; left: number; top: number }; onClose: () => void; onOpen: () => void }) {
+  const previewRef = useRef<HTMLElement | null>(null)
+  const { post, left, top } = preview
+  const thumb = thumbnailUrl(board, post)
+  useEffect(() => {
+    previewRef.current?.focus()
+    const dismissOutside = (event: PointerEvent) => {
+      if (!previewRef.current?.contains(event.target as Node)) onClose()
+    }
+    const dismissWithEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    addEventListener('pointerdown', dismissOutside)
+    addEventListener('keydown', dismissWithEscape)
+    return () => {
+      removeEventListener('pointerdown', dismissOutside)
+      removeEventListener('keydown', dismissWithEscape)
+    }
+  }, [post.no, onClose])
+  return <aside ref={previewRef} className="post-preview" style={{ left, top }} role="dialog" aria-label={`Preview post ${post.no}`} tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen() } }}>
+    <div className="post-preview-head"><div><span className="avatar">{(post.name || 'A')[0]}</span><div><strong>{post.name || 'Anonymous'}{post.trip && <small> {post.trip}</small>}</strong><span>{post.now} · No.{post.no}</span></div></div><span>View post</span></div>
+    {post.sub && <h3 className="post-subject">{htmlToText(post.sub)}</h3>}
+    {thumb && <div className="post-preview-media"><img src={thumb} alt="" referrerPolicy="no-referrer" />{isVideo(post.ext) && <i>▶</i>}</div>}
+    <div className="post-preview-comment">{htmlToText(post.com) || 'No comment.'}</div>
+  </aside>
 }
 
 function MediaViewer({ board, posts, index, onIndex, onClose }: { board: string; posts: Post[]; index: number; onIndex: (index: number) => void; onClose: () => void }) {
