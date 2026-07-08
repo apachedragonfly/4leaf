@@ -265,14 +265,27 @@ function MediaViewer({ board, posts, index, onIndex, onClose }: { board: string;
   const dialogRef = useDialogAccessibility<HTMLDivElement>(onClose)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
   const suppressClick = useRef(false)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const videoPositions = useRef(new Map<string, number>())
   const post = posts[index]
   const url = mediaUrl(board, post)!
-  const previous = () => onIndex((index - 1 + posts.length) % posts.length)
-  const next = () => onIndex((index + 1) % posts.length)
+  const rememberVideoPosition = () => {
+    const video = videoRef.current
+    if (video && Number.isFinite(video.currentTime)) videoPositions.current.set(url, video.currentTime)
+  }
+  const previous = () => { rememberVideoPosition(); onIndex((index - 1 + posts.length) % posts.length) }
+  const next = () => { rememberVideoPosition(); onIndex((index + 1) % posts.length) }
   const finishSwipe = (event: React.TouchEvent) => {
     const start = touchStart.current
     touchStart.current = null
     if (!start || posts.length < 2) return
+    const video = videoRef.current
+    if (video) {
+      const rect = video.getBoundingClientRect()
+      const controlHeight = Math.min(72, Math.max(48, rect.height * .16))
+      const startedInsideControls = start.x >= rect.left && start.x <= rect.right && start.y >= rect.bottom - controlHeight && start.y <= rect.bottom
+      if (startedInsideControls) return
+    }
     const touch = event.changedTouches[0]
     const deltaX = touch.clientX - start.x
     const deltaY = touch.clientY - start.y
@@ -281,6 +294,27 @@ function MediaViewer({ board, posts, index, onIndex, onClose }: { board: string;
     if (deltaX < 0) next()
     else previous()
   }
+  useEffect(() => {
+    const video = dialogRef.current?.querySelector('video')
+    if (!video) return
+    videoRef.current = video
+    const restore = () => {
+      const saved = videoPositions.current.get(url)
+      if (saved !== undefined) video.currentTime = Math.min(saved, video.duration)
+    }
+    const remember = () => {
+      if (Number.isFinite(video.currentTime)) videoPositions.current.set(url, video.currentTime)
+    }
+    if (video.readyState >= 1) restore()
+    else video.addEventListener('loadedmetadata', restore, { once: true })
+    video.addEventListener('timeupdate', remember)
+    return () => {
+      remember()
+      video.removeEventListener('loadedmetadata', restore)
+      video.removeEventListener('timeupdate', remember)
+      if (videoRef.current === video) videoRef.current = null
+    }
+  }, [url])
   useEffect(() => { const key = (e: KeyboardEvent) => { if (e.key === 'ArrowLeft') previous(); if (e.key === 'ArrowRight') next() }; addEventListener('keydown', key); return () => removeEventListener('keydown', key) })
   return <div ref={dialogRef} className="media-viewer" role="dialog" aria-modal="true" aria-label="Media viewer" tabIndex={-1}><button className="media-close" onClick={onClose} aria-label="Close media viewer"><X /></button>{posts.length > 1 && <><button className="media-nav previous" onClick={previous} aria-label="Previous media"><ChevronLeft /></button><button className="media-nav next" onClick={next} aria-label="Next media"><ChevronRight /></button></>}<div className="media-stage" onTouchStart={(event) => { const touch = event.touches[0]; touchStart.current = { x: touch.clientX, y: touch.clientY } }} onTouchEnd={finishSwipe} onTouchCancel={() => { touchStart.current = null }} onClickCapture={(event) => { if (suppressClick.current) { suppressClick.current = false; event.preventDefault(); event.stopPropagation() } }} onClick={onClose}>{isVideo(post.ext) ? <video key={url} src={url} controls autoPlay playsInline loop onClick={(e) => e.stopPropagation()} /> : <img src={url} alt={post.filename || 'Full-size media'} referrerPolicy="no-referrer" onClick={(e) => e.stopPropagation()} />}</div><div className="media-caption"><strong>{post.filename}{post.ext}</strong><span>{formatBytes(post.fsize)} · {post.w}×{post.h}</span><em>{index + 1} / {posts.length}</em></div></div>
 }
