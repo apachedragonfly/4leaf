@@ -217,6 +217,7 @@ function Thread({ board, thread, saved, onToggleSaved }: { board: string; thread
   const [replyQuote, setReplyQuote] = useState<number | null>(null)
   const [requestVersion, setRequestVersion] = useState(0)
   const updateController = useRef<AbortController | null>(null)
+  usePullDownToBoard(board, galleryOpen || mediaIndex !== null || replyOpen || postPreview !== null)
   const load = () => setRequestVersion((value) => value + 1)
   useEffect(() => {
     const controller = new AbortController()
@@ -299,6 +300,53 @@ function PostView({ board, post, op, backlinks, onMedia, onReply, onPostLink }: 
 
 function scrollToPost(post: number) {
   document.getElementById(`p${post}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function usePullDownToBoard(board: string, disabled: boolean) {
+  const gesture = useRef<{ x: number; y: number; lastX: number; lastY: number; startedAt: number } | null>(null)
+  useEffect(() => {
+    const start = (event: TouchEvent) => {
+      const target = event.target instanceof Element ? event.target : null
+      if (disabled || event.touches.length !== 1 || window.scrollY > 2 || !target?.closest('.thread-content') || target.closest('input, textarea, select, [contenteditable="true"]')) {
+        gesture.current = null
+        return
+      }
+      const touch = event.touches[0]
+      gesture.current = { x: touch.clientX, y: touch.clientY, lastX: touch.clientX, lastY: touch.clientY, startedAt: performance.now() }
+    }
+    const move = (event: TouchEvent) => {
+      const current = gesture.current
+      if (!current || event.touches.length !== 1) return
+      const touch = event.touches[0]
+      current.lastX = touch.clientX
+      current.lastY = touch.clientY
+      const deltaX = touch.clientX - current.x
+      const deltaY = touch.clientY - current.y
+      if (deltaY > 12 && deltaY > Math.abs(deltaX) * 1.25) event.preventDefault()
+    }
+    const finish = (event: TouchEvent) => {
+      const current = gesture.current
+      gesture.current = null
+      if (!current || disabled) return
+      const touch = event.changedTouches[0]
+      const endX = touch?.clientX ?? current.lastX
+      const endY = touch?.clientY ?? current.lastY
+      const deltaX = endX - current.x
+      const deltaY = endY - current.y
+      if (deltaY >= 84 && deltaY > Math.abs(deltaX) * 1.35 && performance.now() - current.startedAt < 1200) navigate(board)
+    }
+    const cancel = () => { gesture.current = null }
+    document.addEventListener('touchstart', start, { passive: true })
+    document.addEventListener('touchmove', move, { passive: false })
+    document.addEventListener('touchend', finish, { passive: true })
+    document.addEventListener('touchcancel', cancel, { passive: true })
+    return () => {
+      document.removeEventListener('touchstart', start)
+      document.removeEventListener('touchmove', move)
+      document.removeEventListener('touchend', finish)
+      document.removeEventListener('touchcancel', cancel)
+    }
+  }, [board, disabled])
 }
 
 function Comment({ text, onPostLink }: { text: string; onPostLink: (post: number, anchor: HTMLElement) => void }) {
