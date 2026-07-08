@@ -24,6 +24,8 @@ type Palette = {
 
 type CatalogSort = 'bump' | 'creation' | 'files' | 'last-long' | 'last-reply' | 'ppm' | 'replies'
 type CatalogSize = 'small' | 'medium' | 'large'
+type FilterKind = 'keyword' | 'poster' | 'filename' | 'filetype'
+interface ContentFilter { id: string; kind: FilterKind; value: string; board?: string; enabled: boolean }
 
 const CATALOG_SORTS: { value: CatalogSort; label: string }[] = [
   { value: 'bump', label: 'Bump order' },
@@ -53,6 +55,7 @@ export default function App() {
   const [favorites, setFavorites] = useStoredState<string[]>('4leaf.favorites', ['g', 'v', 'wg'])
   const [saved, setSaved] = useStoredState<Record<string, SavedThread>>('4leaf.saved', {})
   const [threadProgress, setThreadProgress] = useStoredState<Record<string, ThreadProgress>>('4leaf.threadProgress', {})
+  const [contentFilters, setContentFilters] = useStoredState<ContentFilter[]>('4leaf.contentFilters', [])
   const [route, setRoute] = useState<Route>(parseRoute)
   const [boards, setBoards] = useState<Board[]>([])
   const [boardsLoading, setBoardsLoading] = useState(true)
@@ -104,11 +107,11 @@ export default function App() {
         <Header route={route} activeBoard={activeBoard} savedCount={Object.keys(saved).length} onMenu={() => setMenuOpen(true)} onSettings={() => setSettingsOpen(true)} />
         <main>
           {!route.board && <Home boards={boards} boardsLoading={boardsLoading} boardsError={boardsError} onRetry={() => setBoardsRetry((value) => value + 1)} favorites={favorites} saved={saved} threadProgress={threadProgress} onToggleFavorite={toggleFavorite} />}
-          {route.board && !route.thread && <Catalog board={route.board} info={activeBoard} favorite={favorites.includes(route.board)} onToggleFavorite={() => toggleFavorite(route.board!)} />}
-          {route.board && route.thread && <Thread key={`${route.board}/${route.thread}`} board={route.board} thread={route.thread} saved={Boolean(saved[`${route.board}/${route.thread}`])} progress={threadProgress[`${route.board}/${route.thread}`]} onProgress={(next) => setThreadProgress((old) => ({ ...old, [`${route.board}/${route.thread}`]: next }))} onToggleSaved={toggleSaved} />}
+          {route.board && !route.thread && <Catalog board={route.board} info={activeBoard} favorite={favorites.includes(route.board)} filters={contentFilters} onToggleFavorite={() => toggleFavorite(route.board!)} />}
+          {route.board && route.thread && <Thread key={`${route.board}/${route.thread}`} board={route.board} thread={route.thread} saved={Boolean(saved[`${route.board}/${route.thread}`])} filters={contentFilters} progress={threadProgress[`${route.board}/${route.thread}`]} onProgress={(next) => setThreadProgress((old) => ({ ...old, [`${route.board}/${route.thread}`]: next }))} onToggleSaved={toggleSaved} />}
         </main>
       </div>
-      {settingsOpen && <SettingsSheet theme={theme} customPalette={customPalette} onTheme={setTheme} onCustomPalette={setCustomPalette} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsSheet theme={theme} customPalette={customPalette} filters={contentFilters} onFilters={setContentFilters} onTheme={setTheme} onCustomPalette={setCustomPalette} onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }
@@ -187,7 +190,7 @@ function Home({ boards, boardsLoading, boardsError, onRetry, favorites, saved, t
   </div>
 }
 
-function Catalog({ board, info, favorite, onToggleFavorite }: { board: string; info?: Board; favorite: boolean; onToggleFavorite: () => void }) {
+function Catalog({ board, info, favorite, filters, onToggleFavorite }: { board: string; info?: Board; favorite: boolean; filters: ContentFilter[]; onToggleFavorite: () => void }) {
   const [threads, setThreads] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -205,7 +208,7 @@ function Catalog({ board, info, favorite, onToggleFavorite }: { board: string; i
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
   }, [board, requestVersion])
-  const visible = useMemo(() => sortCatalog(threads.filter((p) => htmlToText(`${p.sub ?? ''} ${p.com ?? ''}`).toLowerCase().includes(query.toLowerCase())), sort), [threads, query, sort])
+  const visible = useMemo(() => sortCatalog(threads.filter((post) => htmlToText(`${post.sub ?? ''} ${post.com ?? ''}`).toLowerCase().includes(query.toLowerCase()) && !findMatchingFilter(post, board, filters)), sort), [threads, query, sort, board, filters])
   return <div className="content catalog-content">
     <section className="board-heading"><div><span className="board-slug large">/{board}/</span><h2>{info?.title ?? 'Board'}</h2><p>{info?.meta_description}</p></div><div className="heading-actions"><button className={`secondary ${favorite ? 'selected' : ''}`} onClick={onToggleFavorite}><Bookmark size={17} fill={favorite ? 'currentColor' : 'none'} /> {favorite ? 'Favorited' : 'Favorite'}</button><a className="primary" href={officialBoardUrl(board)} target="_blank" rel="noreferrer">Open official <ExternalLink size={16} /></a></div></section>
     <div className="catalog-tools">
@@ -246,6 +249,19 @@ function lastLongReply(thread: Post) {
   return thread.omitted_posts && replies[0] ? replies[0].no : thread.no
 }
 
+const FILTER_KIND_LABELS: Record<FilterKind, string> = { keyword: 'Text', poster: 'Poster', filename: 'Filename', filetype: 'File type' }
+function findMatchingFilter(post: Post, board: string, filters: ContentFilter[]) {
+  return filters.find((filter) => {
+    if (!filter.enabled || (filter.board && filter.board !== board)) return false
+    const needle = filter.value.trim().toLowerCase()
+    if (!needle) return false
+    if (filter.kind === 'keyword') return htmlToText(`${post.sub ?? ''} ${post.com ?? ''}`).toLowerCase().includes(needle)
+    if (filter.kind === 'poster') return `${post.name ?? ''} ${post.trip ?? ''} ${post.id ?? ''}`.toLowerCase().includes(needle)
+    if (filter.kind === 'filename') return `${post.filename ?? ''}${post.ext ?? ''}`.toLowerCase().includes(needle)
+    return (post.ext ?? '').replace(/^\./, '').toLowerCase() === needle.replace(/^\./, '')
+  })
+}
+
 function ThreadCard({ board, post }: { board: string; post: Post }) {
   const thumb = thumbnailUrl(board, post)
   return <button className="thread-card" onClick={() => navigate(board, post.no)} aria-label={`Open ${htmlToText(post.sub) || `thread ${post.no}`}`}>
@@ -254,7 +270,7 @@ function ThreadCard({ board, post }: { board: string; post: Post }) {
   </button>
 }
 
-function Thread({ board, thread, saved, progress, onProgress, onToggleSaved }: { board: string; thread: number; saved: boolean; progress?: ThreadProgress; onProgress: (progress: ThreadProgress) => void; onToggleSaved: (item: SavedThread) => void }) {
+function Thread({ board, thread, saved, filters, progress, onProgress, onToggleSaved }: { board: string; thread: number; saved: boolean; filters: ContentFilter[]; progress?: ThreadProgress; onProgress: (progress: ThreadProgress) => void; onToggleSaved: (item: SavedThread) => void }) {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
@@ -263,6 +279,7 @@ function Thread({ board, thread, saved, progress, onProgress, onToggleSaved }: {
   const [live, setLive] = useStoredState('4leaf.liveThreads', true)
   const [error, setError] = useState('')
   const [mediaIndex, setMediaIndex] = useState<number | null>(null)
+  const [mediaOverride, setMediaOverride] = useState<Post | null>(null)
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [postPreview, setPostPreview] = useState<{ post: Post; left: number; top: number } | null>(null)
   const [replyOpen, setReplyOpen] = useState(false)
@@ -365,7 +382,8 @@ function Thread({ board, thread, saved, progress, onProgress, onToggleSaved }: {
     return () => observer.disconnect()
   }, [posts])
   const op = posts[0]
-  const media = posts.filter((post) => post.tim && post.ext)
+  const media = posts.filter((post) => post.tim && post.ext && !findMatchingFilter(post, board, filters))
+  const viewerMedia = mediaOverride ? [mediaOverride] : media
   const backlinks = useMemo(() => {
     const knownPosts = new Set(posts.map((post) => post.no))
     const links = new Map<number, number[]>()
@@ -392,29 +410,35 @@ function Thread({ board, thread, saved, progress, onProgress, onToggleSaved }: {
     setPostPreview({ post: referencedPost, left, top })
   }
   const closeMedia = () => {
-    const postNumber = mediaIndex === null ? null : media[mediaIndex]?.no
+    const postNumber = mediaIndex === null ? null : viewerMedia[mediaIndex]?.no
     setMediaIndex(null)
+    setMediaOverride(null)
     if (postNumber) requestAnimationFrame(() => scrollToPost(postNumber))
   }
   return <div className="content thread-content">
     <div className="thread-toolbar"><div><span>{posts.length ? `${posts.length} posts` : 'Thread'}</span>{op?.closed === 1 && <span className="closed-pill">Closed</span>}</div><div><button className={`secondary live-toggle ${live ? 'selected' : ''}`} onClick={() => setLive((value) => !value)} aria-pressed={live}><Radio size={15} /> {live ? 'Live' : 'Paused'}</button><button className="secondary gallery-button" disabled={!media.length} onClick={() => setGalleryOpen(true)}><Images size={17} /> Gallery <span>{media.length}</span></button><button className={`icon-button ${saved ? 'selected' : ''}`} disabled={!op} onClick={() => onToggleSaved({ board, no: thread, title, savedAt: Date.now() })} aria-label="Save thread"><Bookmark fill={saved ? 'currentColor' : 'none'} /></button><button className="icon-button" disabled={loading || updating} onClick={loadNewer} aria-label="Load newer posts"><RefreshCw className={updating ? 'spinning' : ''} /></button><button className="primary" disabled={op?.closed === 1} onClick={() => openReply()}>Reply <MessageCircle size={15} /></button></div></div>
-    {loading ? <ThreadSkeleton /> : error ? <ErrorState message={error} retry={load} /> : <><div className="posts">{posts.map((post, index) => <Fragment key={post.no}>{post.no === newBoundary && <div className="new-posts-divider" id="new-posts"><span>{boundaryCount} new post{boundaryCount === 1 ? '' : 's'}</span></div>}<PostView board={board} post={post} op={index === 0} backlinks={backlinks.get(post.no) ?? []} onMedia={() => setMediaIndex(media.findIndex((item) => item.no === post.no))} onReply={() => openReply(post.no)} onPostLink={openPostPreview} /></Fragment>)}</div><div className="thread-updater" aria-live="polite"><span>{updateStatus || (live ? 'Live · checks every 30s' : 'Live updates paused')}</span><button className="secondary" disabled={updating} onClick={loadNewer}><RefreshCw className={updating ? 'spinning' : ''} /> {updating ? 'Checking…' : 'Check now'}</button></div></>}
-    {postPreview && <PostPreview board={board} preview={postPreview} onClose={() => setPostPreview(null)} onOpen={() => { const postNumber = postPreview.post.no; setPostPreview(null); requestAnimationFrame(() => scrollToPost(postNumber)) }} />}
-    {galleryOpen && <MediaGallery board={board} posts={media} onClose={() => setGalleryOpen(false)} onSelect={(index) => { setGalleryOpen(false); setMediaIndex(index) }} />}
-    {mediaIndex !== null && <MediaViewer board={board} posts={media} index={mediaIndex} onIndex={setMediaIndex} onClose={closeMedia} />}
+    {loading ? <ThreadSkeleton /> : error ? <ErrorState message={error} retry={load} /> : <><div className="posts">{posts.map((post, index) => { const filter = findMatchingFilter(post, board, filters); return <Fragment key={post.no}>{post.no === newBoundary && <div className="new-posts-divider" id="new-posts"><span>{boundaryCount} new post{boundaryCount === 1 ? '' : 's'}</span></div>}<PostView board={board} post={post} op={index === 0} opNumber={op?.no ?? thread} filter={filter} backlinks={backlinks.get(post.no) ?? []} onMedia={() => { const mediaPosition = media.findIndex((item) => item.no === post.no); if (mediaPosition >= 0) { setMediaOverride(null); setMediaIndex(mediaPosition) } else if (post.tim && post.ext) { setMediaOverride(post); setMediaIndex(0) } }} onReply={() => openReply(post.no)} onPostLink={openPostPreview} /></Fragment> })}</div><div className="thread-updater" aria-live="polite"><span>{updateStatus || (live ? 'Live · checks every 30s' : 'Live updates paused')}</span><button className="secondary" disabled={updating} onClick={loadNewer}><RefreshCw className={updating ? 'spinning' : ''} /> {updating ? 'Checking…' : 'Check now'}</button></div></>}
+    {postPreview && <PostPreview board={board} preview={postPreview} opNumber={op?.no ?? thread} filter={findMatchingFilter(postPreview.post, board, filters)} onClose={() => setPostPreview(null)} onOpen={() => { const postNumber = postPreview.post.no; setPostPreview(null); requestAnimationFrame(() => scrollToPost(postNumber)) }} />}
+    {galleryOpen && <MediaGallery board={board} posts={media} onClose={() => setGalleryOpen(false)} onSelect={(index) => { setGalleryOpen(false); setMediaOverride(null); setMediaIndex(index) }} />}
+    {mediaIndex !== null && <MediaViewer board={board} posts={viewerMedia} index={mediaIndex} onIndex={setMediaIndex} onClose={closeMedia} />}
     {replyOpen && <ReplyComposer key={`${board}/${thread}/${replyQuote ?? 'thread'}`} board={board} thread={thread} quote={replyQuote} onClose={() => setReplyOpen(false)} onPosted={() => { setReplyOpen(false); setTimeout(loadNewer, 1200) }} />}
   </div>
 }
 
-function PostView({ board, post, op, backlinks, onMedia, onReply, onPostLink }: { board: string; post: Post; op: boolean; backlinks: number[]; onMedia: () => void; onReply: () => void; onPostLink: (post: number, anchor: HTMLElement) => void }) {
+function PostView({ board, post, op, opNumber, filter, backlinks, onMedia, onReply, onPostLink }: { board: string; post: Post; op: boolean; opNumber: number; filter?: ContentFilter; backlinks: number[]; onMedia: () => void; onReply: () => void; onPostLink: (post: number, anchor: HTMLElement) => void }) {
   const thumb = thumbnailUrl(board, post)
   const text = htmlToText(post.com)
+  const [revealed, setRevealed] = useState(false)
+  if (filter && !revealed) return <article className="post filtered-post" id={`p${post.no}`} data-post-no={post.no}>
+    <div><strong>Post No.{post.no} filtered</strong><span>{FILTER_KIND_LABELS[filter.kind]} matches “{filter.value}”{filter.board && ` on /${filter.board}/`}</span></div>
+    <button className="secondary" onClick={() => setRevealed(true)}>Show post</button>
+  </article>
   return <article className={`post ${op ? 'op' : ''}`} id={`p${post.no}`} data-post-no={post.no}>
     <div className="post-head"><div><span className="avatar">{(post.name || 'A')[0]}</span><div><strong>{post.name || 'Anonymous'}{post.trip && <small> {post.trip}</small>}</strong><span>{post.now} · No.{post.no}</span></div></div><button className="post-reply-button" onClick={onReply}><MessageCircle /> Reply</button></div>
     {post.sub && <h3 className="post-subject">{htmlToText(post.sub)}</h3>}
     <div className={`post-content ${thumb ? 'has-media' : ''}`}>
       {thumb && <button className="post-media" onClick={onMedia} aria-label={`Open ${post.filename || 'attached media'}`}><img src={thumb} alt="" loading="lazy" referrerPolicy="no-referrer" /><span>{post.ext?.slice(1).toUpperCase()} · {formatBytes(post.fsize)}{post.w && ` · ${post.w}×${post.h}`}</span>{isVideo(post.ext) && <span className="play">▶</span>}</button>}
-      <Comment text={text} onPostLink={onPostLink} />
+      <Comment text={text} opNumber={opNumber} onPostLink={onPostLink} />
     </div>
     {backlinks.length > 0 && <div className="post-backlinks"><span>Replies:</span>{backlinks.map((reply) => <button key={reply} className="post-link" onClick={(event) => onPostLink(reply, event.currentTarget)}>&gt;&gt;{reply}</button>)}</div>}
   </article>
@@ -471,11 +495,16 @@ function usePullDownToBoard(board: string, disabled: boolean) {
   }, [board, disabled])
 }
 
-function Comment({ text, onPostLink }: { text: string; onPostLink: (post: number, anchor: HTMLElement) => void }) {
-  return <div className="comment">{text.split('\n').map((line, i) => <p key={i} className={line.startsWith('>') && !line.startsWith('>>') ? 'quote' : ''}>{line.split(/(>>\d+)/g).map((part, j) => part.match(/^>>\d+$/) ? <button key={j} className="post-link" onClick={(event) => onPostLink(Number(part.slice(2)), event.currentTarget)}>{part}</button> : part)}</p>)}</div>
+function Comment({ text, opNumber, onPostLink }: { text: string; opNumber: number; onPostLink: (post: number, anchor: HTMLElement) => void }) {
+  return <div className="comment">{text.split('\n').map((line, i) => {
+    const normalizedLine = line.replace(new RegExp(`(>>${opNumber})\\s*\\(OP\\)`, 'g'), '$1')
+    return <p key={i} className={line.startsWith('>') && !line.startsWith('>>') ? 'quote' : ''}>{normalizedLine.split(/(>>\d+)/g).map((part, j) => {
+    const postNumber = part.match(/^>>\d+$/) ? Number(part.slice(2)) : null
+    return postNumber ? <button key={j} className="post-link" onClick={(event) => onPostLink(postNumber, event.currentTarget)}>{part}{postNumber === opNumber && <span className="op-marker"> (OP)</span>}</button> : part
+  })}</p>})}</div>
 }
 
-function PostPreview({ board, preview, onClose, onOpen }: { board: string; preview: { post: Post; left: number; top: number }; onClose: () => void; onOpen: () => void }) {
+function PostPreview({ board, preview, opNumber, filter, onClose, onOpen }: { board: string; preview: { post: Post; left: number; top: number }; opNumber: number; filter?: ContentFilter; onClose: () => void; onOpen: () => void }) {
   const previewRef = useRef<HTMLElement | null>(null)
   const { post, left, top } = preview
   const thumb = thumbnailUrl(board, post)
@@ -493,11 +522,18 @@ function PostPreview({ board, preview, onClose, onOpen }: { board: string; previ
     }
   }, [post.no, onClose])
   return <aside ref={previewRef} className="post-preview" style={{ left, top }} role="dialog" aria-label={`Preview post ${post.no}`} tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen() } }}>
+    {filter ? <div className="filtered-preview"><strong>Filtered post</strong><span>{FILTER_KIND_LABELS[filter.kind]} matches “{filter.value}”</span><small>Open it to reveal the post.</small></div> : <>
     <div className="post-preview-head"><div><span className="avatar">{(post.name || 'A')[0]}</span><div><strong>{post.name || 'Anonymous'}{post.trip && <small> {post.trip}</small>}</strong><span>{post.now} · No.{post.no}</span></div></div><span>View post</span></div>
     {post.sub && <h3 className="post-subject">{htmlToText(post.sub)}</h3>}
     {thumb && <div className="post-preview-media"><img src={thumb} alt="" referrerPolicy="no-referrer" />{isVideo(post.ext) && <i>▶</i>}</div>}
-    <div className="post-preview-comment">{htmlToText(post.com) || 'No comment.'}</div>
+    <div className="post-preview-comment">{markOpQuoteText(htmlToText(post.com), opNumber) || 'No comment.'}</div>
+    </>}
   </aside>
+}
+
+function markOpQuoteText(text: string, opNumber: number) {
+  const quote = `>>${opNumber}`
+  return text.replace(new RegExp(`${quote}\\s*(?:\\(OP\\))?`, 'g'), `${quote} (OP)`)
 }
 
 function MediaViewer({ board, posts, index, onIndex, onClose }: { board: string; posts: Post[]; index: number; onIndex: (index: number) => void; onClose: () => void }) {
@@ -665,7 +701,7 @@ function ReplyComposer({ board, thread, quote, onClose, onPosted }: { board: str
   return <><button className="scrim visible reply-scrim" onClick={onClose} aria-label="Close quick reply" /><aside ref={dialogRef} className="reply-composer" role="dialog" aria-modal="true" aria-labelledby="reply-title" tabIndex={-1}><div className="sheet-head"><div><span className="eyebrow">/{board}/ · No.{thread}</span><h2 id="reply-title">Quick reply</h2></div><button className="icon-button" onClick={onClose} aria-label="Close quick reply"><X /></button></div>{isNativeApp && <div className="composer-fields"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)" aria-label="Name" /><input value={options} onChange={(e) => setOptions(e.target.value)} placeholder="Options (e.g. sage)" aria-label="Post options" /></div>}<textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Write a reply…" aria-label="Reply text" /><div className="composer-count">{draft.length.toLocaleString()} characters</div>{isNativeApp ? <div className="native-attachment"><label><ImageIcon /> <span>{file ? file.name : 'Attach image or WebM'}</span><input type="file" accept="image/*,.webm,video/webm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label><label className="spoiler-toggle"><input type="checkbox" checked={spoiler} onChange={(e) => setSpoiler(e.target.checked)} /> Spoiler</label></div> : <div className="handoff-note"><ShieldCheck /><p><strong>Secure posting handoff</strong><span>The web app copies your draft and opens 4chan for final submission. Install the native build to post directly.</span></p></div>}{status && <p className="composer-status" aria-live="polite">{status}</p>}<div className="composer-actions"><button className="secondary" disabled={!draft && !file} onClick={() => { setDraft(''); setFile(null) }}><X size={16} /> Clear</button>{isNativeApp ? <button className="primary" disabled={submitting || (!draft.trim() && !file)} onClick={postNative}><Send size={16} /> {submitting ? 'Posting…' : 'Post reply'}</button> : <button className="primary" disabled={!draft.trim()} onClick={continueTo4chan}><Copy size={16} /> Copy & continue <Send size={15} /></button>}</div></aside></>
 }
 
-function SettingsSheet({ theme, customPalette, onTheme, onCustomPalette, onClose }: { theme: ThemeId; customPalette: Palette; onTheme: (theme: ThemeId) => void; onCustomPalette: (palette: Palette) => void; onClose: () => void }) {
+function SettingsSheet({ theme, customPalette, filters, onTheme, onCustomPalette, onFilters, onClose }: { theme: ThemeId; customPalette: Palette; filters: ContentFilter[]; onTheme: (theme: ThemeId) => void; onCustomPalette: (palette: Palette) => void; onFilters: (filters: ContentFilter[] | ((old: ContentFilter[]) => ContentFilter[])) => void; onClose: () => void }) {
   const dialogRef = useDialogAccessibility<HTMLElement>(onClose)
   const standalone = matchMedia('(display-mode: standalone)').matches
   const changeColor = (key: keyof Palette, value: string) => {
@@ -684,10 +720,38 @@ function SettingsSheet({ theme, customPalette, onTheme, onCustomPalette, onClose
         <div className="color-grid">{(Object.keys(COLOR_LABELS) as (keyof Palette)[]).map((key) => <ColorControl key={key} label={COLOR_LABELS[key]} value={customPalette[key]} onChange={(value) => changeColor(key, value)} />)}</div>
       </div>
     </section>
+    <ContentFilterSettings filters={filters} onFilters={onFilters} />
     <section><h3>Install 4leaf</h3>{standalone ? <div className="installed"><Check /> Installed on this device</div> : <div className="install-note"><Share /><p><strong>Add to your Home Screen</strong><span>In Safari, tap Share, then “Add to Home Screen.”</span></p></div>}</section>
     <section><h3>4chan Pass</h3>{isNativeApp ? <NativePassPanel /> : <><p className="settings-copy">Pass authorization must happen on 4chan so Safari can store its secure cookie. Once authorized, use “Open official” or “Reply” from 4leaf.</p><a className="secondary wide" href="https://sys.4chan.org/auth" target="_blank" rel="noreferrer">Authorize on 4chan <ExternalLink size={16} /></a></>}</section>
     <p className="fine-print">4leaf uses 4chan’s read-only JSON API. It never receives or stores your Pass token or PIN.</p>
   </aside></>
+}
+
+function ContentFilterSettings({ filters, onFilters }: { filters: ContentFilter[]; onFilters: (filters: ContentFilter[] | ((old: ContentFilter[]) => ContentFilter[])) => void }) {
+  const [kind, setKind] = useState<FilterKind>('keyword')
+  const [value, setValue] = useState('')
+  const [board, setBoard] = useState('')
+  const addFilter = (event: React.FormEvent) => {
+    event.preventDefault()
+    const normalizedValue = value.trim()
+    if (!normalizedValue) return
+    const normalizedBoard = board.trim().toLowerCase().replaceAll('/', '')
+    onFilters((old) => [...old, { id: crypto.randomUUID(), kind, value: normalizedValue, board: normalizedBoard || undefined, enabled: true }])
+    setValue('')
+  }
+  return <section className="content-filter-settings">
+    <div className="settings-section-head"><div><h3>Content filters</h3><p>Collapse matching posts and threads. Rules stay on this device.</p></div><ShieldCheck /></div>
+    <form className="filter-builder" onSubmit={addFilter}>
+      <select value={kind} onChange={(event) => setKind(event.target.value as FilterKind)} aria-label="Filter type">{Object.entries(FILTER_KIND_LABELS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>
+      <input value={value} onChange={(event) => setValue(event.target.value)} placeholder={kind === 'filetype' ? 'e.g. webm' : `Match ${FILTER_KIND_LABELS[kind].toLowerCase()}`} aria-label="Filter value" />
+      <input value={board} onChange={(event) => setBoard(event.target.value)} placeholder="Board (optional)" aria-label="Limit filter to board" autoCapitalize="none" />
+      <button className="primary" type="submit" disabled={!value.trim()}>Add rule</button>
+    </form>
+    {filters.length ? <div className="filter-list">{filters.map((filter) => <div className={`filter-rule ${filter.enabled ? '' : 'disabled'}`} key={filter.id}>
+      <label><input type="checkbox" checked={filter.enabled} onChange={() => onFilters((old) => old.map((item) => item.id === filter.id ? { ...item, enabled: !item.enabled } : item))} /><span><strong>{FILTER_KIND_LABELS[filter.kind]} · {filter.value}</strong><small>{filter.board ? `Only /${filter.board}/` : 'All boards'}</small></span></label>
+      <button onClick={() => onFilters((old) => old.filter((item) => item.id !== filter.id))} aria-label={`Delete ${filter.value} filter`}><X /></button>
+    </div>)}</div> : <p className="empty-filters">No filter rules yet.</p>}
+  </section>
 }
 
 const COLOR_LABELS: Record<keyof Palette, string> = { bg: 'Background', surface: 'Cards', ink: 'Text', muted: 'Muted text', accent: 'Accent', sidebar: 'Sidebar', sidebarInk: 'Sidebar text', danger: 'Danger' }

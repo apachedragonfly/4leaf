@@ -17,6 +17,7 @@ export interface Post {
   time: number
   name?: string
   trip?: string
+  id?: string
   sub?: string
   com?: string
   tim?: number
