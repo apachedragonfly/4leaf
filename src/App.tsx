@@ -1,19 +1,42 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft, Bookmark, Check, ChevronLeft, ChevronRight, Copy, ExternalLink,
-  House, Image as ImageIcon, Images, Menu, MessageCircle, Moon, RefreshCw,
-  Search, Send, Settings, Share, ShieldCheck, Sun, X,
+  House, Image as ImageIcon, Images, Menu, MessageCircle, RefreshCw,
+  Palette as PaletteIcon, RotateCcw, Search, Send, Settings, Share, ShieldCheck, X,
 } from 'lucide-react'
 import { getBoards, getCatalog, getThread, mediaUrl, officialBoardUrl, officialThreadUrl, thumbnailUrl } from './api'
 import { authorizePass, clearPass, hasAuthorizedPass, isNativeApp, submitNativeReply } from './native'
 import type { Board, Post, Route } from './types'
 import { formatBytes, htmlToText, navigate, parseRoute, timeAgo, useStoredState } from './utils'
 
-type Theme = 'light' | 'dark'
+type ThemeId = 'leaf' | 'yotsuba-b' | 'tomorrow' | 'photon' | 'custom'
+type StoredTheme = ThemeId | 'light' | 'dark'
+type Palette = {
+  bg: string
+  surface: string
+  ink: string
+  muted: string
+  accent: string
+  sidebar: string
+  sidebarInk: string
+  danger: string
+}
+
+const THEME_PRESETS: Record<Exclude<ThemeId, 'custom'>, { name: string; description: string; palette: Palette }> = {
+  leaf: { name: 'Leaf', description: 'Warm and quiet', palette: { bg: '#f7f3e8', surface: '#fffdf7', ink: '#1d231f', muted: '#6e756e', accent: '#26734d', sidebar: '#194e35', sidebarInk: '#ecf5ed', danger: '#a23b32' } },
+  'yotsuba-b': { name: 'Yotsuba B', description: 'Cool imageboard classic', palette: { bg: '#eef2ff', surface: '#d6daf0', ink: '#000000', muted: '#5a5a78', accent: '#34345c', sidebar: '#d6daf0', sidebarInk: '#34345c', danger: '#af0a0f' } },
+  tomorrow: { name: 'Tomorrow', description: 'Low-glare dark', palette: { bg: '#1d1f21', surface: '#282a2e', ink: '#c5c8c6', muted: '#969896', accent: '#81a2be', sidebar: '#161719', sidebarInk: '#c5c8c6', danger: '#cc6666' } },
+  photon: { name: 'Photon', description: 'Crisp and neutral', palette: { bg: '#eeeeee', surface: '#ffffff', ink: '#333333', muted: '#767676', accent: '#1d8dc4', sidebar: '#2d2d2d', sidebarInk: '#eeeeee', danger: '#b42318' } },
+}
+
+const DEFAULT_CUSTOM_PALETTE = { ...THEME_PRESETS.leaf.palette }
+const normalizeTheme = (theme: StoredTheme): ThemeId => theme === 'light' ? 'leaf' : theme === 'dark' ? 'tomorrow' : theme
 
 export default function App() {
   const [accepted, setAccepted] = useStoredState('4leaf.accepted', false)
-  const [theme, setTheme] = useStoredState<Theme>('4leaf.theme', 'light')
+  const [storedTheme, setTheme] = useStoredState<StoredTheme>('4leaf.theme', 'leaf')
+  const [customPalette, setCustomPalette] = useStoredState<Palette>('4leaf.customPalette', DEFAULT_CUSTOM_PALETTE)
+  const theme = normalizeTheme(storedTheme)
   const [favorites, setFavorites] = useStoredState<string[]>('4leaf.favorites', ['g', 'v', 'wg'])
   const [saved, setSaved] = useStoredState<Record<string, SavedThread>>('4leaf.saved', {})
   const [route, setRoute] = useState<Route>(parseRoute)
@@ -26,8 +49,12 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#151714' : '#f7f3e8')
-  }, [theme])
+    const palette = theme === 'custom' ? customPalette : THEME_PRESETS[theme].palette
+    const root = document.documentElement
+    Object.entries(palette).forEach(([key, value]) => root.style.setProperty(`--theme-${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`, value))
+    root.style.colorScheme = isDarkColor(palette.bg) ? 'dark' : 'light'
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', palette.bg)
+  }, [theme, customPalette])
   useEffect(() => {
     const onHash = () => { setRoute(parseRoute()); setMenuOpen(false); window.scrollTo(0, 0) }
     window.addEventListener('hashchange', onHash)
@@ -67,7 +94,7 @@ export default function App() {
           {route.board && route.thread && <Thread board={route.board} thread={route.thread} saved={Boolean(saved[`${route.board}/${route.thread}`])} onToggleSaved={toggleSaved} />}
         </main>
       </div>
-      {settingsOpen && <SettingsSheet theme={theme} onTheme={setTheme} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsSheet theme={theme} customPalette={customPalette} onTheme={setTheme} onCustomPalette={setCustomPalette} onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }
@@ -468,15 +495,47 @@ function ReplyComposer({ board, thread, quote, onClose, onPosted }: { board: str
   return <><button className="scrim visible reply-scrim" onClick={onClose} aria-label="Close quick reply" /><aside ref={dialogRef} className="reply-composer" role="dialog" aria-modal="true" aria-labelledby="reply-title" tabIndex={-1}><div className="sheet-head"><div><span className="eyebrow">/{board}/ · No.{thread}</span><h2 id="reply-title">Quick reply</h2></div><button className="icon-button" onClick={onClose} aria-label="Close quick reply"><X /></button></div>{isNativeApp && <div className="composer-fields"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)" aria-label="Name" /><input value={options} onChange={(e) => setOptions(e.target.value)} placeholder="Options (e.g. sage)" aria-label="Post options" /></div>}<textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Write a reply…" aria-label="Reply text" /><div className="composer-count">{draft.length.toLocaleString()} characters</div>{isNativeApp ? <div className="native-attachment"><label><ImageIcon /> <span>{file ? file.name : 'Attach image or WebM'}</span><input type="file" accept="image/*,.webm,video/webm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label><label className="spoiler-toggle"><input type="checkbox" checked={spoiler} onChange={(e) => setSpoiler(e.target.checked)} /> Spoiler</label></div> : <div className="handoff-note"><ShieldCheck /><p><strong>Secure posting handoff</strong><span>The web app copies your draft and opens 4chan for final submission. Install the native build to post directly.</span></p></div>}{status && <p className="composer-status" aria-live="polite">{status}</p>}<div className="composer-actions"><button className="secondary" disabled={!draft && !file} onClick={() => { setDraft(''); setFile(null) }}><X size={16} /> Clear</button>{isNativeApp ? <button className="primary" disabled={submitting || (!draft.trim() && !file)} onClick={postNative}><Send size={16} /> {submitting ? 'Posting…' : 'Post reply'}</button> : <button className="primary" disabled={!draft.trim()} onClick={continueTo4chan}><Copy size={16} /> Copy & continue <Send size={15} /></button>}</div></aside></>
 }
 
-function SettingsSheet({ theme, onTheme, onClose }: { theme: Theme; onTheme: (theme: Theme) => void; onClose: () => void }) {
+function SettingsSheet({ theme, customPalette, onTheme, onCustomPalette, onClose }: { theme: ThemeId; customPalette: Palette; onTheme: (theme: ThemeId) => void; onCustomPalette: (palette: Palette) => void; onClose: () => void }) {
   const dialogRef = useDialogAccessibility<HTMLElement>(onClose)
   const standalone = matchMedia('(display-mode: standalone)').matches
+  const changeColor = (key: keyof Palette, value: string) => {
+    onCustomPalette({ ...customPalette, [key]: value })
+    onTheme('custom')
+  }
   return <><button className="scrim visible" onClick={onClose} aria-label="Close settings" /><aside ref={dialogRef} className="settings-sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1}><div className="sheet-head"><div><span className="eyebrow">4leaf</span><h2 id="settings-title">Settings</h2></div><button className="icon-button" onClick={onClose} aria-label="Close settings"><X /></button></div>
-    <section><h3>Appearance</h3><div className="segmented"><button className={theme === 'light' ? 'active' : ''} onClick={() => onTheme('light')}><Sun /> Light</button><button className={theme === 'dark' ? 'active' : ''} onClick={() => onTheme('dark')}><Moon /> Dark</button></div></section>
+    <section className="appearance-settings">
+      <div className="settings-section-head"><div><h3>Theme</h3><p>Presets inspired by familiar 4chan X styles.</p></div><PaletteIcon /></div>
+      <div className="theme-grid">{Object.entries(THEME_PRESETS).map(([id, preset]) => <button key={id} className={`theme-option ${theme === id ? 'active' : ''}`} onClick={() => onTheme(id as ThemeId)} aria-pressed={theme === id}>
+        <span className="theme-swatches" aria-hidden="true"><i style={{ background: preset.palette.bg }} /><i style={{ background: preset.palette.surface }} /><i style={{ background: preset.palette.accent }} /><i style={{ background: preset.palette.ink }} /></span>
+        <span><strong>{preset.name}</strong><small>{preset.description}</small></span>{theme === id && <Check />}
+      </button>)}</div>
+      <div className={`custom-theme ${theme === 'custom' ? 'active' : ''}`}>
+        <div className="custom-theme-head"><div><strong>Custom colors</strong><span>Changes preview instantly.</span></div><button className="reset-colors" onClick={() => { onCustomPalette(DEFAULT_CUSTOM_PALETTE); onTheme('custom') }}><RotateCcw /> Reset</button></div>
+        <div className="color-grid">{(Object.keys(COLOR_LABELS) as (keyof Palette)[]).map((key) => <ColorControl key={key} label={COLOR_LABELS[key]} value={customPalette[key]} onChange={(value) => changeColor(key, value)} />)}</div>
+      </div>
+    </section>
     <section><h3>Install 4leaf</h3>{standalone ? <div className="installed"><Check /> Installed on this device</div> : <div className="install-note"><Share /><p><strong>Add to your Home Screen</strong><span>In Safari, tap Share, then “Add to Home Screen.”</span></p></div>}</section>
     <section><h3>4chan Pass</h3>{isNativeApp ? <NativePassPanel /> : <><p className="settings-copy">Pass authorization must happen on 4chan so Safari can store its secure cookie. Once authorized, use “Open official” or “Reply” from 4leaf.</p><a className="secondary wide" href="https://sys.4chan.org/auth" target="_blank" rel="noreferrer">Authorize on 4chan <ExternalLink size={16} /></a></>}</section>
     <p className="fine-print">4leaf uses 4chan’s read-only JSON API. It never receives or stores your Pass token or PIN.</p>
   </aside></>
+}
+
+const COLOR_LABELS: Record<keyof Palette, string> = { bg: 'Background', surface: 'Cards', ink: 'Text', muted: 'Muted text', accent: 'Accent', sidebar: 'Sidebar', sidebarInk: 'Sidebar text', danger: 'Danger' }
+const validHex = (value: string) => /^#[\da-f]{6}$/i.test(value)
+function ColorControl({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const [draft, setDraft] = useState(value)
+  useEffect(() => setDraft(value), [value])
+  const commit = () => validHex(draft) ? onChange(draft) : setDraft(value)
+  return <label className="color-control"><span>{label}</span><span className="color-value">
+    <input type="color" value={validHex(value) ? value : '#000000'} onChange={(event) => onChange(event.target.value)} aria-label={`${label} color`} />
+    <input type="text" value={draft} maxLength={7} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit(); event.currentTarget.blur() } }} spellCheck={false} aria-label={`${label} hex value`} />
+  </span></label>
+}
+function isDarkColor(hex: string) {
+  if (!validHex(hex)) return false
+  const [red, green, blue] = [hex.slice(1, 3), hex.slice(3, 5), hex.slice(5, 7)].map((channel) => Number.parseInt(channel, 16) / 255)
+  const luminance = [red, green, blue].map((channel) => channel <= .03928 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4)
+  return .2126 * luminance[0] + .7152 * luminance[1] + .0722 * luminance[2] < .35
 }
 
 function NativePassPanel() {
