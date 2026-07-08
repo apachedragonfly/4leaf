@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowLeft, Bookmark, Check, ChevronLeft, ChevronRight, Copy, ExternalLink,
+  ArrowLeft, ArrowUpDown, Bookmark, Check, ChevronLeft, ChevronRight, Copy, ExternalLink,
   House, Image as ImageIcon, Images, Menu, MessageCircle, RefreshCw,
   Palette as PaletteIcon, RotateCcw, Search, Send, Settings, Share, ShieldCheck, X,
 } from 'lucide-react'
@@ -21,6 +21,19 @@ type Palette = {
   sidebarInk: string
   danger: string
 }
+
+type CatalogSort = 'bump' | 'creation' | 'files' | 'last-long' | 'last-reply' | 'ppm' | 'replies'
+type CatalogSize = 'small' | 'medium' | 'large'
+
+const CATALOG_SORTS: { value: CatalogSort; label: string }[] = [
+  { value: 'bump', label: 'Bump order' },
+  { value: 'creation', label: 'Creation date' },
+  { value: 'files', label: 'File count' },
+  { value: 'last-long', label: 'Last long reply' },
+  { value: 'last-reply', label: 'Last reply' },
+  { value: 'ppm', label: 'Posts per minute' },
+  { value: 'replies', label: 'Reply count' },
+]
 
 const THEME_PRESETS: Record<Exclude<ThemeId, 'custom'>, { name: string; description: string; palette: Palette }> = {
   leaf: { name: 'Leaf', description: 'Warm and quiet', palette: { bg: '#f7f3e8', surface: '#fffdf7', ink: '#1d231f', muted: '#6e756e', accent: '#26734d', sidebar: '#194e35', sidebarInk: '#ecf5ed', danger: '#a23b32' } },
@@ -177,6 +190,8 @@ function Catalog({ board, info, favorite, onToggleFavorite }: { board: string; i
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
+  const [sort, setSort] = useStoredState<CatalogSort>('4leaf.catalogSort', 'bump')
+  const [catalogSize, setCatalogSize] = useStoredState<CatalogSize>('4leaf.catalogSize', 'medium')
   const [requestVersion, setRequestVersion] = useState(0)
   const load = () => setRequestVersion((value) => value + 1)
   useEffect(() => {
@@ -188,12 +203,45 @@ function Catalog({ board, info, favorite, onToggleFavorite }: { board: string; i
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
   }, [board, requestVersion])
-  const visible = useMemo(() => threads.filter((p) => htmlToText(`${p.sub ?? ''} ${p.com ?? ''}`).toLowerCase().includes(query.toLowerCase())), [threads, query])
+  const visible = useMemo(() => sortCatalog(threads.filter((p) => htmlToText(`${p.sub ?? ''} ${p.com ?? ''}`).toLowerCase().includes(query.toLowerCase())), sort), [threads, query, sort])
   return <div className="content catalog-content">
     <section className="board-heading"><div><span className="board-slug large">/{board}/</span><h2>{info?.title ?? 'Board'}</h2><p>{info?.meta_description}</p></div><div className="heading-actions"><button className={`secondary ${favorite ? 'selected' : ''}`} onClick={onToggleFavorite}><Bookmark size={17} fill={favorite ? 'currentColor' : 'none'} /> {favorite ? 'Favorited' : 'Favorite'}</button><a className="primary" href={officialBoardUrl(board)} target="_blank" rel="noreferrer">Open official <ExternalLink size={16} /></a></div></section>
-    <div className="catalog-tools"><div className="search-box compact"><Search size={18} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter this catalog" aria-label="Filter this catalog" /></div><button className="icon-button refresh" onClick={load} aria-label="Refresh"><RefreshCw size={18} /></button></div>
-    {loading ? <LoadingCatalog /> : error ? <ErrorState message={error} retry={load} /> : !visible.length ? <EmptySearch /> : <div className="catalog-grid">{visible.map((post) => <ThreadCard key={post.no} board={board} post={post} />)}</div>}
+    <div className="catalog-tools">
+      <div className="search-box compact"><Search size={18} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter this catalog" aria-label="Filter this catalog" /></div>
+      <label className="catalog-select"><ArrowUpDown /><span className="sr-only">Sort catalog</span><select value={sort} onChange={(event) => setSort(event.target.value as CatalogSort)} aria-label="Sort catalog">{CATALOG_SORTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+      <div className="catalog-size" role="group" aria-label="Catalog size">{(['small', 'medium', 'large'] as CatalogSize[]).map((size) => <button key={size} className={catalogSize === size ? 'active' : ''} onClick={() => setCatalogSize(size)} aria-label={`${size} catalog cards`} aria-pressed={catalogSize === size} title={size}>{size[0].toUpperCase()}</button>)}</div>
+      <button className="icon-button refresh" onClick={load} aria-label="Refresh"><RefreshCw size={18} /></button>
+    </div>
+    {loading ? <LoadingCatalog size={catalogSize} /> : error ? <ErrorState message={error} retry={load} /> : !visible.length ? <EmptySearch /> : <div className={`catalog-grid size-${catalogSize}`}>{visible.map((post) => <ThreadCard key={post.no} board={board} post={post} />)}</div>}
   </div>
+}
+
+function sortCatalog(threads: Post[], sort: CatalogSort) {
+  if (sort === 'bump') return threads
+  const now = Date.now() / 1000
+  const value = (thread: Post) => {
+    switch (sort) {
+      case 'creation': return thread.time
+      case 'files': return thread.images ?? 0
+      case 'last-long': return lastLongReply(thread)
+      case 'last-reply': return thread.last_replies?.at(-1)?.no ?? thread.no
+      case 'ppm': return ((thread.replies ?? 0) + 1) / Math.max((now - thread.time) / 60, 1)
+      case 'replies': return thread.replies ?? 0
+      default: return 0
+    }
+  }
+  const originalOrder = new Map(threads.map((thread, index) => [thread.no, index]))
+  return [...threads].sort((a, b) => value(b) - value(a) || (originalOrder.get(a.no) ?? 0) - (originalOrder.get(b.no) ?? 0))
+}
+
+function lastLongReply(thread: Post) {
+  const replies = thread.last_replies ?? []
+  for (let index = replies.length - 1; index >= 0; index -= 1) {
+    const reply = replies[index]
+    const letterCount = htmlToText(reply.com).replace(/[^a-z]/gi, '').length
+    if (letterCount >= 100) return reply.no
+  }
+  return thread.omitted_posts && replies[0] ? replies[0].no : thread.no
 }
 
 function ThreadCard({ board, post }: { board: string; post: Post }) {
@@ -654,7 +702,7 @@ function Logo() { return <span className="logo"><svg viewBox="0 0 100 100" aria-
 function isVideo(ext?: string) { return ext === '.webm' || ext === '.mp4' }
 function SectionHeading({ title, action }: { title: string; action: string }) { return <div className="section-heading"><h2>{title}</h2><span>{action}</span></div> }
 function LoadingCards() { return <div className="board-grid">{Array.from({ length: 12 }, (_, i) => <div className="board-card skeleton" key={i} />)}</div> }
-function LoadingCatalog() { return <div className="catalog-grid">{Array.from({ length: 12 }, (_, i) => <div className="thread-card skeleton" key={i} />)}</div> }
+function LoadingCatalog({ size = 'medium' }: { size?: CatalogSize }) { return <div className={`catalog-grid size-${size}`}>{Array.from({ length: 12 }, (_, i) => <div className="thread-card skeleton" key={i} />)}</div> }
 function ThreadSkeleton() { return <div className="posts">{Array.from({ length: 5 }, (_, i) => <div className="post skeleton" key={i} />)}</div> }
 function ErrorState({ message, retry }: { message: string; retry: () => void }) { return <div className="state-card"><span>That leaf blew away.</span><h2>{message}</h2><button className="secondary" onClick={retry}><RefreshCw size={16} /> Try again</button></div> }
 function EmptySearch() { return <div className="state-card"><Search /><h2>No matching threads</h2><span>Try a broader phrase.</span></div> }

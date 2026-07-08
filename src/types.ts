@@ -29,6 +29,9 @@ export interface Post {
   tn_h?: number
   replies?: number
   images?: number
+  last_modified?: number
+  last_replies?: Post[]
+  omitted_posts?: number
   bumplimit?: number
   imagelimit?: number
   sticky?: number
