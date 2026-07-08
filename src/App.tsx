@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft, ArrowUpDown, Bookmark, Check, ChevronLeft, ChevronRight, Copy, ExternalLink,
-  House, Image as ImageIcon, Images, Menu, MessageCircle, RefreshCw,
+  House, Image as ImageIcon, Images, Menu, MessageCircle, Radio, RefreshCw,
   Palette as PaletteIcon, RotateCcw, Search, Send, Settings, Share, ShieldCheck, X,
 } from 'lucide-react'
 import { getBoards, getCatalog, getThread, mediaUrl, officialBoardUrl, officialThreadUrl, thumbnailUrl } from './api'
@@ -52,6 +52,7 @@ export default function App() {
   const theme = normalizeTheme(storedTheme)
   const [favorites, setFavorites] = useStoredState<string[]>('4leaf.favorites', ['g', 'v', 'wg'])
   const [saved, setSaved] = useStoredState<Record<string, SavedThread>>('4leaf.saved', {})
+  const [threadProgress, setThreadProgress] = useStoredState<Record<string, ThreadProgress>>('4leaf.threadProgress', {})
   const [route, setRoute] = useState<Route>(parseRoute)
   const [boards, setBoards] = useState<Board[]>([])
   const [boardsLoading, setBoardsLoading] = useState(true)
@@ -98,13 +99,13 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar boards={boards} favorites={favorites} saved={saved} route={route} open={menuOpen} apiStatus={boardsError ? 'error' : boardsLoading ? 'loading' : 'connected'} onClose={() => setMenuOpen(false)} />
+      <Sidebar boards={boards} favorites={favorites} saved={saved} threadProgress={threadProgress} route={route} open={menuOpen} apiStatus={boardsError ? 'error' : boardsLoading ? 'loading' : 'connected'} onClose={() => setMenuOpen(false)} />
       <div className="page-shell">
         <Header route={route} activeBoard={activeBoard} savedCount={Object.keys(saved).length} onMenu={() => setMenuOpen(true)} onSettings={() => setSettingsOpen(true)} />
         <main>
-          {!route.board && <Home boards={boards} boardsLoading={boardsLoading} boardsError={boardsError} onRetry={() => setBoardsRetry((value) => value + 1)} favorites={favorites} saved={saved} onToggleFavorite={toggleFavorite} />}
+          {!route.board && <Home boards={boards} boardsLoading={boardsLoading} boardsError={boardsError} onRetry={() => setBoardsRetry((value) => value + 1)} favorites={favorites} saved={saved} threadProgress={threadProgress} onToggleFavorite={toggleFavorite} />}
           {route.board && !route.thread && <Catalog board={route.board} info={activeBoard} favorite={favorites.includes(route.board)} onToggleFavorite={() => toggleFavorite(route.board!)} />}
-          {route.board && route.thread && <Thread board={route.board} thread={route.thread} saved={Boolean(saved[`${route.board}/${route.thread}`])} onToggleSaved={toggleSaved} />}
+          {route.board && route.thread && <Thread key={`${route.board}/${route.thread}`} board={route.board} thread={route.thread} saved={Boolean(saved[`${route.board}/${route.thread}`])} progress={threadProgress[`${route.board}/${route.thread}`]} onProgress={(next) => setThreadProgress((old) => ({ ...old, [`${route.board}/${route.thread}`]: next }))} onToggleSaved={toggleSaved} />}
         </main>
       </div>
       {settingsOpen && <SettingsSheet theme={theme} customPalette={customPalette} onTheme={setTheme} onCustomPalette={setCustomPalette} onClose={() => setSettingsOpen(false)} />}
@@ -113,6 +114,7 @@ export default function App() {
 }
 
 interface SavedThread { board: string; no: number; title: string; savedAt: number }
+interface ThreadProgress { lastReadPost: number; latestPost: number; unread: number; updatedAt: number }
 
 function Welcome({ onAccept }: { onAccept: () => void }) {
   return <div className="welcome">
@@ -144,7 +146,7 @@ function Header({ route, activeBoard, savedCount, onMenu, onSettings }: { route:
   </header>
 }
 
-function Sidebar({ boards, favorites, saved, route, open, apiStatus, onClose }: { boards: Board[]; favorites: string[]; saved: Record<string, SavedThread>; route: Route; open: boolean; apiStatus: 'loading' | 'connected' | 'error'; onClose: () => void }) {
+function Sidebar({ boards, favorites, saved, threadProgress, route, open, apiStatus, onClose }: { boards: Board[]; favorites: string[]; saved: Record<string, SavedThread>; threadProgress: Record<string, ThreadProgress>; route: Route; open: boolean; apiStatus: 'loading' | 'connected' | 'error'; onClose: () => void }) {
   const favoriteBoards = favorites.map((id) => boards.find((b) => b.board === id)).filter(Boolean) as Board[]
   return <>
     {open && <button className="scrim" onClick={onClose} aria-label="Close menu" />}
@@ -157,7 +159,7 @@ function Sidebar({ boards, favorites, saved, route, open, apiStatus, onClose }: 
         {!favoriteBoards.length && <p className="empty-nav">Star a board to keep it here.</p>}
         <div className="nav-section"><span>Saved threads</span><span>{Object.keys(saved).length}</span></div>
         {Object.values(saved).sort((a, b) => b.savedAt - a.savedAt).slice(0, 5).map((thread) =>
-          <NavItem key={`${thread.board}/${thread.no}`} icon={<MessageCircle />} label={thread.title} sub={`/${thread.board}/ · #${thread.no}`} active={route.thread === thread.no && route.board === thread.board} onClick={() => navigate(thread.board, thread.no)} />
+          <NavItem key={`${thread.board}/${thread.no}`} icon={<MessageCircle />} label={thread.title} sub={`/${thread.board}/ · #${thread.no}`} badge={threadProgress[`${thread.board}/${thread.no}`]?.unread} active={route.thread === thread.no && route.board === thread.board} onClick={() => navigate(thread.board, thread.no)} />
         )}
       </nav>
       <div className="sidebar-foot"><span className={`status-dot ${apiStatus}`} /> {apiStatus === 'error' ? 'API unavailable' : apiStatus === 'loading' ? 'Connecting to API' : 'Read-only API connected'}</div>
@@ -165,18 +167,18 @@ function Sidebar({ boards, favorites, saved, route, open, apiStatus, onClose }: 
   </>
 }
 
-function NavItem({ icon, label, sub, active, onClick }: { icon: React.ReactNode; label: string; sub?: string; active?: boolean; onClick: () => void }) {
-  return <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}><span className="nav-icon">{icon}</span><span className="nav-copy"><strong>{label}</strong>{sub && <small>{sub}</small>}</span></button>
+function NavItem({ icon, label, sub, badge, active, onClick }: { icon: React.ReactNode; label: string; sub?: string; badge?: number; active?: boolean; onClick: () => void }) {
+  return <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}><span className="nav-icon">{icon}</span><span className="nav-copy"><strong>{label}</strong>{sub && <small>{sub}</small>}</span>{Boolean(badge) && <span className="unread-badge" aria-label={`${badge} unread posts`}>{badge! > 99 ? '99+' : badge}</span>}</button>
 }
 
-function Home({ boards, boardsLoading, boardsError, onRetry, favorites, saved, onToggleFavorite }: { boards: Board[]; boardsLoading: boolean; boardsError: string; onRetry: () => void; favorites: string[]; saved: Record<string, SavedThread>; onToggleFavorite: (board: string) => void }) {
+function Home({ boards, boardsLoading, boardsError, onRetry, favorites, saved, threadProgress, onToggleFavorite }: { boards: Board[]; boardsLoading: boolean; boardsError: string; onRetry: () => void; favorites: string[]; saved: Record<string, SavedThread>; threadProgress: Record<string, ThreadProgress>; onToggleFavorite: (board: string) => void }) {
   const [query, setQuery] = useState('')
   const [showAll, setShowAll] = useState(false)
   const filtered = boards.filter((b) => `${b.board} ${b.title}`.toLowerCase().includes(query.toLowerCase()))
   const visible = query || showAll ? filtered : filtered.slice(0, 18)
   return <div className="content home-content">
     <div className="search-box"><Search size={19} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a board" aria-label="Find a board" />{query && <button onClick={() => setQuery('')} aria-label="Clear board search"><X size={17} /></button>}</div>
-    {Object.keys(saved).length > 0 && <section className="section-block"><SectionHeading title="Saved threads" action="See in sidebar" /><div className="saved-grid">{Object.values(saved).sort((a, b) => b.savedAt - a.savedAt).slice(0, 3).map((item) => <button className="saved-card" key={`${item.board}/${item.no}`} onClick={() => navigate(item.board, item.no)}><span>/{item.board}/</span><strong>{item.title}</strong><small>Thread #{item.no}</small><ChevronRight /></button>)}</div></section>}
+    {Object.keys(saved).length > 0 && <section className="section-block"><SectionHeading title="Saved threads" action="See in sidebar" /><div className="saved-grid">{Object.values(saved).sort((a, b) => b.savedAt - a.savedAt).slice(0, 3).map((item) => { const unread = threadProgress[`${item.board}/${item.no}`]?.unread; return <button className="saved-card" key={`${item.board}/${item.no}`} onClick={() => navigate(item.board, item.no)}><span>/{item.board}/</span><strong>{item.title}</strong><small>Thread #{item.no}</small>{Boolean(unread) && <em className="unread-badge">{unread! > 99 ? '99+' : unread} new</em>}<ChevronRight /></button> })}</div></section>}
     <section className="section-block">
       <SectionHeading title={query ? 'Search results' : 'All boards'} action={`${boards.length} boards`} />
       {boardsLoading ? <LoadingCards /> : boardsError ? <ErrorState message={boardsError} retry={onRetry} /> : <div className="board-grid">{visible.map((board) => <article className="board-card" key={board.board}><button className="board-card-link" onClick={() => navigate(board.board)}><div><span className="board-slug">/{board.board}/</span><strong>{board.title}</strong></div><p>{board.meta_description || 'View this board’s catalog and active threads.'}</p></button><button className={`star ${favorites.includes(board.board) ? 'selected' : ''}`} onClick={() => onToggleFavorite(board.board)} aria-label={`${favorites.includes(board.board) ? 'Remove' : 'Add'} /${board.board}/ ${favorites.includes(board.board) ? 'from' : 'to'} favorites`}><Bookmark size={17} fill={favorites.includes(board.board) ? 'currentColor' : 'none'} /></button></article>)}</div>}
@@ -252,11 +254,13 @@ function ThreadCard({ board, post }: { board: string; post: Post }) {
   </button>
 }
 
-function Thread({ board, thread, saved, onToggleSaved }: { board: string; thread: number; saved: boolean; onToggleSaved: (item: SavedThread) => void }) {
+function Thread({ board, thread, saved, progress, onProgress, onToggleSaved }: { board: string; thread: number; saved: boolean; progress?: ThreadProgress; onProgress: (progress: ThreadProgress) => void; onToggleSaved: (item: SavedThread) => void }) {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
   const [updateStatus, setUpdateStatus] = useState('')
+  const [newBoundary, setNewBoundary] = useState<number | null>(null)
+  const [live, setLive] = useStoredState('4leaf.liveThreads', true)
   const [error, setError] = useState('')
   const [mediaIndex, setMediaIndex] = useState<number | null>(null)
   const [galleryOpen, setGalleryOpen] = useState(false)
@@ -265,32 +269,101 @@ function Thread({ board, thread, saved, onToggleSaved }: { board: string; thread
   const [replyQuote, setReplyQuote] = useState<number | null>(null)
   const [requestVersion, setRequestVersion] = useState(0)
   const updateController = useRef<AbortController | null>(null)
+  const updateInFlight = useRef(false)
+  const postsRef = useRef<Post[]>([])
+  const progressRef = useRef(progress)
+  const refreshRef = useRef<() => void>(() => {})
+  const initialLastRead = useRef(progress?.lastReadPost ?? 0)
   usePullDownToBoard(board, galleryOpen || mediaIndex !== null || replyOpen || postPreview !== null)
   const load = () => setRequestVersion((value) => value + 1)
+  useEffect(() => { postsRef.current = posts }, [posts])
+  useEffect(() => { progressRef.current = progress }, [progress])
   useEffect(() => {
     const controller = new AbortController()
-    setLoading(true); setUpdating(false); setPosts([]); setError(''); setUpdateStatus('')
+    setLoading(true); setUpdating(false); setPosts([]); setError(''); setUpdateStatus(''); setNewBoundary(null)
     getThread(board, thread, controller.signal)
-      .then(setPosts)
+      .then((next) => {
+        const lastReadPost = initialLastRead.current || next[0]?.no || 0
+        const firstUnread = initialLastRead.current ? next.find((post) => post.no > initialLastRead.current)?.no ?? null : null
+        const nextProgress = {
+          lastReadPost,
+          latestPost: next.at(-1)?.no ?? lastReadPost,
+          unread: next.filter((post) => post.no > lastReadPost).length,
+          updatedAt: Date.now(),
+        }
+        postsRef.current = next
+        progressRef.current = nextProgress
+        setPosts(next)
+        setNewBoundary(firstUnread)
+        onProgress(nextProgress)
+        if (initialLastRead.current) requestAnimationFrame(() => {
+          document.getElementById(firstUnread ? 'new-posts' : `p${lastReadPost}`)?.scrollIntoView({ block: firstUnread ? 'center' : 'start' })
+        })
+      })
       .catch((error: Error) => { if (!controller.signal.aborted) setError(error.message) })
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
-  }, [board, thread, requestVersion])
+  }, [board, thread, requestVersion]) // onProgress changes after each write; this request only follows route/retry changes.
   useEffect(() => () => updateController.current?.abort(), [board, thread])
   const loadNewer = () => {
-    if (loading || updating) return
+    if (loading || updateInFlight.current) return
     updateController.current?.abort()
     const controller = new AbortController()
     updateController.current = controller
+    updateInFlight.current = true
     setUpdating(true); setUpdateStatus('')
-    const existing = new Set(posts.map((post) => post.no))
+    const existing = new Set(postsRef.current.map((post) => post.no))
     getThread(board, thread, controller.signal).then((next) => {
-      const added = next.filter((post) => !existing.has(post.no)).length
+      const addedPosts = next.filter((post) => !existing.has(post.no))
+      const currentProgress = progressRef.current
+      const lastReadPost = currentProgress?.lastReadPost ?? next[0]?.no ?? 0
+      const nextProgress = {
+        lastReadPost,
+        latestPost: next.at(-1)?.no ?? currentProgress?.latestPost ?? 0,
+        unread: next.filter((post) => post.no > lastReadPost).length,
+        updatedAt: Date.now(),
+      }
+      postsRef.current = next
+      progressRef.current = nextProgress
       setPosts(next)
-      setUpdateStatus(added ? `${added} new post${added === 1 ? '' : 's'} loaded.` : 'No new posts.')
-      if (added) requestAnimationFrame(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' }))
-    }).catch((error: Error) => { if (!controller.signal.aborted) setUpdateStatus(error.message) }).finally(() => { if (!controller.signal.aborted) setUpdating(false) })
+      onProgress(nextProgress)
+      if (addedPosts.length) setNewBoundary((current) => current ?? addedPosts[0].no)
+      setUpdateStatus(addedPosts.length ? `${addedPosts.length} new post${addedPosts.length === 1 ? '' : 's'} available.` : 'Checked just now · no new posts')
+    }).catch((error: Error) => { if (!controller.signal.aborted) setUpdateStatus(error.message) }).finally(() => {
+      if (updateController.current === controller) {
+        updateInFlight.current = false
+        if (!controller.signal.aborted) setUpdating(false)
+      }
+    })
   }
+  refreshRef.current = loadNewer
+  useEffect(() => {
+    if (!live || loading || error) return
+    const check = () => { if (document.visibilityState === 'visible') refreshRef.current() }
+    const interval = window.setInterval(check, 30_000)
+    const onVisibility = () => { if (document.visibilityState === 'visible') check() }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => { window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisibility) }
+  }, [live, loading, error, board, thread])
+  useEffect(() => {
+    if (!posts.length) return
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.filter((entry) => entry.isIntersecting).map((entry) => Number((entry.target as HTMLElement).dataset.postNo)).filter(Number.isFinite)
+      if (!visible.length) return
+      const lastReadPost = Math.max(progressRef.current?.lastReadPost ?? 0, ...visible)
+      if (lastReadPost === progressRef.current?.lastReadPost) return
+      const nextProgress = {
+        lastReadPost,
+        latestPost: postsRef.current.at(-1)?.no ?? lastReadPost,
+        unread: postsRef.current.filter((post) => post.no > lastReadPost).length,
+        updatedAt: Date.now(),
+      }
+      progressRef.current = nextProgress
+      onProgress(nextProgress)
+    }, { rootMargin: '0px 0px -55% 0px', threshold: 0 })
+    document.querySelectorAll<HTMLElement>('.post[data-post-no]').forEach((post) => observer.observe(post))
+    return () => observer.disconnect()
+  }, [posts])
   const op = posts[0]
   const media = posts.filter((post) => post.tim && post.ext)
   const backlinks = useMemo(() => {
@@ -306,6 +379,7 @@ function Thread({ board, thread, saved, onToggleSaved }: { board: string; thread
     return links
   }, [posts])
   const title = htmlToText(op?.sub) || htmlToText(op?.com).slice(0, 60) || `Thread #${thread}`
+  const boundaryCount = newBoundary ? posts.filter((post) => post.no >= newBoundary).length : 0
   const openReply = (quote?: number) => { setReplyQuote(quote ?? null); setReplyOpen(true) }
   const openPostPreview = (postNumber: number, anchor: HTMLElement) => {
     const referencedPost = posts.find((item) => item.no === postNumber)
@@ -323,8 +397,8 @@ function Thread({ board, thread, saved, onToggleSaved }: { board: string; thread
     if (postNumber) requestAnimationFrame(() => scrollToPost(postNumber))
   }
   return <div className="content thread-content">
-    <div className="thread-toolbar"><div><span>{posts.length ? `${posts.length} posts` : 'Thread'}</span>{op?.closed === 1 && <span className="closed-pill">Closed</span>}</div><div><button className="secondary gallery-button" disabled={!media.length} onClick={() => setGalleryOpen(true)}><Images size={17} /> Gallery <span>{media.length}</span></button><button className={`icon-button ${saved ? 'selected' : ''}`} disabled={!op} onClick={() => onToggleSaved({ board, no: thread, title, savedAt: Date.now() })} aria-label="Save thread"><Bookmark fill={saved ? 'currentColor' : 'none'} /></button><button className="icon-button" disabled={loading || updating} onClick={loadNewer} aria-label="Load newer posts"><RefreshCw className={updating ? 'spinning' : ''} /></button><button className="primary" disabled={op?.closed === 1} onClick={() => openReply()}>Reply <MessageCircle size={15} /></button></div></div>
-    {loading ? <ThreadSkeleton /> : error ? <ErrorState message={error} retry={load} /> : <><div className="posts">{posts.map((post, index) => <PostView key={post.no} board={board} post={post} op={index === 0} backlinks={backlinks.get(post.no) ?? []} onMedia={() => setMediaIndex(media.findIndex((item) => item.no === post.no))} onReply={() => openReply(post.no)} onPostLink={openPostPreview} />)}</div><div className="thread-updater" aria-live="polite"><span>{updateStatus || `${posts.length} posts loaded`}</span><button className="secondary" disabled={updating} onClick={loadNewer}><RefreshCw className={updating ? 'spinning' : ''} /> {updating ? 'Checking…' : 'Load newer posts'}</button></div></>}
+    <div className="thread-toolbar"><div><span>{posts.length ? `${posts.length} posts` : 'Thread'}</span>{op?.closed === 1 && <span className="closed-pill">Closed</span>}</div><div><button className={`secondary live-toggle ${live ? 'selected' : ''}`} onClick={() => setLive((value) => !value)} aria-pressed={live}><Radio size={15} /> {live ? 'Live' : 'Paused'}</button><button className="secondary gallery-button" disabled={!media.length} onClick={() => setGalleryOpen(true)}><Images size={17} /> Gallery <span>{media.length}</span></button><button className={`icon-button ${saved ? 'selected' : ''}`} disabled={!op} onClick={() => onToggleSaved({ board, no: thread, title, savedAt: Date.now() })} aria-label="Save thread"><Bookmark fill={saved ? 'currentColor' : 'none'} /></button><button className="icon-button" disabled={loading || updating} onClick={loadNewer} aria-label="Load newer posts"><RefreshCw className={updating ? 'spinning' : ''} /></button><button className="primary" disabled={op?.closed === 1} onClick={() => openReply()}>Reply <MessageCircle size={15} /></button></div></div>
+    {loading ? <ThreadSkeleton /> : error ? <ErrorState message={error} retry={load} /> : <><div className="posts">{posts.map((post, index) => <Fragment key={post.no}>{post.no === newBoundary && <div className="new-posts-divider" id="new-posts"><span>{boundaryCount} new post{boundaryCount === 1 ? '' : 's'}</span></div>}<PostView board={board} post={post} op={index === 0} backlinks={backlinks.get(post.no) ?? []} onMedia={() => setMediaIndex(media.findIndex((item) => item.no === post.no))} onReply={() => openReply(post.no)} onPostLink={openPostPreview} /></Fragment>)}</div><div className="thread-updater" aria-live="polite"><span>{updateStatus || (live ? 'Live · checks every 30s' : 'Live updates paused')}</span><button className="secondary" disabled={updating} onClick={loadNewer}><RefreshCw className={updating ? 'spinning' : ''} /> {updating ? 'Checking…' : 'Check now'}</button></div></>}
     {postPreview && <PostPreview board={board} preview={postPreview} onClose={() => setPostPreview(null)} onOpen={() => { const postNumber = postPreview.post.no; setPostPreview(null); requestAnimationFrame(() => scrollToPost(postNumber)) }} />}
     {galleryOpen && <MediaGallery board={board} posts={media} onClose={() => setGalleryOpen(false)} onSelect={(index) => { setGalleryOpen(false); setMediaIndex(index) }} />}
     {mediaIndex !== null && <MediaViewer board={board} posts={media} index={mediaIndex} onIndex={setMediaIndex} onClose={closeMedia} />}
@@ -335,7 +409,7 @@ function Thread({ board, thread, saved, onToggleSaved }: { board: string; thread
 function PostView({ board, post, op, backlinks, onMedia, onReply, onPostLink }: { board: string; post: Post; op: boolean; backlinks: number[]; onMedia: () => void; onReply: () => void; onPostLink: (post: number, anchor: HTMLElement) => void }) {
   const thumb = thumbnailUrl(board, post)
   const text = htmlToText(post.com)
-  return <article className={`post ${op ? 'op' : ''}`} id={`p${post.no}`}>
+  return <article className={`post ${op ? 'op' : ''}`} id={`p${post.no}`} data-post-no={post.no}>
     <div className="post-head"><div><span className="avatar">{(post.name || 'A')[0]}</span><div><strong>{post.name || 'Anonymous'}{post.trip && <small> {post.trip}</small>}</strong><span>{post.now} · No.{post.no}</span></div></div><button className="post-reply-button" onClick={onReply}><MessageCircle /> Reply</button></div>
     {post.sub && <h3 className="post-subject">{htmlToText(post.sub)}</h3>}
     <div className={`post-content ${thumb ? 'has-media' : ''}`}>
