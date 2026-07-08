@@ -230,11 +230,16 @@ function Thread({ board, thread, saved, onToggleSaved }: { board: string; thread
   }, [posts])
   const title = htmlToText(op?.sub) || htmlToText(op?.com).slice(0, 60) || `Thread #${thread}`
   const openReply = (quote?: number) => { setReplyQuote(quote ?? null); setReplyOpen(true) }
+  const closeMedia = () => {
+    const postNumber = mediaIndex === null ? null : media[mediaIndex]?.no
+    setMediaIndex(null)
+    if (postNumber) requestAnimationFrame(() => scrollToPost(postNumber))
+  }
   return <div className="content thread-content">
     <div className="thread-toolbar"><div><span>{posts.length ? `${posts.length} posts` : 'Thread'}</span>{op?.closed === 1 && <span className="closed-pill">Closed</span>}</div><div><button className="secondary gallery-button" disabled={!media.length} onClick={() => setGalleryOpen(true)}><Images size={17} /> Gallery <span>{media.length}</span></button><button className={`icon-button ${saved ? 'selected' : ''}`} disabled={!op} onClick={() => onToggleSaved({ board, no: thread, title, savedAt: Date.now() })} aria-label="Save thread"><Bookmark fill={saved ? 'currentColor' : 'none'} /></button><button className="icon-button" disabled={loading || updating} onClick={loadNewer} aria-label="Load newer posts"><RefreshCw className={updating ? 'spinning' : ''} /></button><button className="primary" disabled={op?.closed === 1} onClick={() => openReply()}>Reply <MessageCircle size={15} /></button></div></div>
     {loading ? <ThreadSkeleton /> : error ? <ErrorState message={error} retry={load} /> : <><div className="posts">{posts.map((post, index) => <PostView key={post.no} board={board} post={post} op={index === 0} backlinks={backlinks.get(post.no) ?? []} onMedia={() => setMediaIndex(media.findIndex((item) => item.no === post.no))} onReply={() => openReply(post.no)} />)}</div><div className="thread-updater" aria-live="polite"><span>{updateStatus || `${posts.length} posts loaded`}</span><button className="secondary" disabled={updating} onClick={loadNewer}><RefreshCw className={updating ? 'spinning' : ''} /> {updating ? 'Checking…' : 'Load newer posts'}</button></div></>}
     {galleryOpen && <MediaGallery board={board} posts={media} onClose={() => setGalleryOpen(false)} onSelect={(index) => { setGalleryOpen(false); setMediaIndex(index) }} />}
-    {mediaIndex !== null && <MediaViewer board={board} posts={media} index={mediaIndex} onIndex={setMediaIndex} onClose={() => setMediaIndex(null)} />}
+    {mediaIndex !== null && <MediaViewer board={board} posts={media} index={mediaIndex} onIndex={setMediaIndex} onClose={closeMedia} />}
     {replyOpen && <ReplyComposer key={`${board}/${thread}/${replyQuote ?? 'thread'}`} board={board} thread={thread} quote={replyQuote} onClose={() => setReplyOpen(false)} onPosted={() => { setReplyOpen(false); setTimeout(loadNewer, 1200) }} />}
   </div>
 }
@@ -264,35 +269,71 @@ function Comment({ text }: { text: string }) {
 function MediaViewer({ board, posts, index, onIndex, onClose }: { board: string; posts: Post[]; index: number; onIndex: (index: number) => void; onClose: () => void }) {
   const dialogRef = useDialogAccessibility<HTMLDivElement>(onClose)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
+  const touchAxis = useRef<'pending' | 'horizontal' | 'vertical'>('pending')
   const suppressClick = useRef(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const videoPositions = useRef(new Map<string, number>())
+  const settleTimer = useRef<number | null>(null)
+  const [dragOffset, setDragOffset] = useState(0)
+  const [settling, setSettling] = useState(false)
   const post = posts[index]
   const url = mediaUrl(board, post)!
+  const previousIndex = (index - 1 + posts.length) % posts.length
+  const nextIndex = (index + 1) % posts.length
   const rememberVideoPosition = () => {
     const video = videoRef.current
     if (video && Number.isFinite(video.currentTime)) videoPositions.current.set(url, video.currentTime)
   }
-  const previous = () => { rememberVideoPosition(); onIndex((index - 1 + posts.length) % posts.length) }
-  const next = () => { rememberVideoPosition(); onIndex((index + 1) % posts.length) }
-  const finishSwipe = (event: React.TouchEvent) => {
-    const start = touchStart.current
-    touchStart.current = null
-    if (!start || posts.length < 2) return
+  const navigateMedia = (direction: -1 | 1) => {
+    if (settling || posts.length < 2) return
+    rememberVideoPosition()
+    setSettling(true)
+    const stageWidth = dialogRef.current?.querySelector<HTMLElement>('.media-stage')?.clientWidth ?? window.innerWidth
+    setDragOffset(direction * -stageWidth)
+    settleTimer.current = window.setTimeout(() => {
+      onIndex(direction === 1 ? nextIndex : previousIndex)
+      setSettling(false)
+      setDragOffset(0)
+    }, 220)
+  }
+  const startSwipe = (event: React.TouchEvent) => {
+    if (settling) return
+    const touch = event.touches[0]
     const video = videoRef.current
     if (video) {
       const rect = video.getBoundingClientRect()
       const controlHeight = Math.min(72, Math.max(48, rect.height * .16))
-      const startedInsideControls = start.x >= rect.left && start.x <= rect.right && start.y >= rect.bottom - controlHeight && start.y <= rect.bottom
-      if (startedInsideControls) return
+      const insideControls = touch.clientX >= rect.left && touch.clientX <= rect.right && touch.clientY >= rect.bottom - controlHeight && touch.clientY <= rect.bottom
+      if (insideControls) return
     }
-    const touch = event.changedTouches[0]
+    touchStart.current = { x: touch.clientX, y: touch.clientY }
+    touchAxis.current = 'pending'
+  }
+  const moveSwipe = (event: React.TouchEvent) => {
+    const start = touchStart.current
+    if (!start || settling) return
+    const touch = event.touches[0]
     const deltaX = touch.clientX - start.x
     const deltaY = touch.clientY - start.y
-    if (Math.abs(deltaX) < 50 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.25) return
+    if (touchAxis.current === 'pending' && Math.max(Math.abs(deltaX), Math.abs(deltaY)) > 7) {
+      touchAxis.current = Math.abs(deltaX) > Math.abs(deltaY) * 1.1 ? 'horizontal' : 'vertical'
+    }
+    if (touchAxis.current !== 'horizontal') return
+    setDragOffset(deltaX)
+  }
+  const finishSwipe = (event: React.TouchEvent) => {
+    const start = touchStart.current
+    touchStart.current = null
+    if (!start || touchAxis.current !== 'horizontal') return
+    const touch = event.changedTouches[0]
+    const deltaX = touch.clientX - start.x
     suppressClick.current = true
-    if (deltaX < 0) next()
-    else previous()
+    if (Math.abs(deltaX) >= 50 && posts.length > 1) navigateMedia(deltaX < 0 ? 1 : -1)
+    else {
+      setSettling(true)
+      setDragOffset(0)
+      settleTimer.current = window.setTimeout(() => setSettling(false), 220)
+    }
   }
   useEffect(() => {
     const video = dialogRef.current?.querySelector('video')
@@ -315,8 +356,35 @@ function MediaViewer({ board, posts, index, onIndex, onClose }: { board: string;
       if (videoRef.current === video) videoRef.current = null
     }
   }, [url])
-  useEffect(() => { const key = (e: KeyboardEvent) => { if (e.key === 'ArrowLeft') previous(); if (e.key === 'ArrowRight') next() }; addEventListener('keydown', key); return () => removeEventListener('keydown', key) })
-  return <div ref={dialogRef} className="media-viewer" role="dialog" aria-modal="true" aria-label="Media viewer" tabIndex={-1}><button className="media-close" onClick={onClose} aria-label="Close media viewer"><X /></button>{posts.length > 1 && <><button className="media-nav previous" onClick={previous} aria-label="Previous media"><ChevronLeft /></button><button className="media-nav next" onClick={next} aria-label="Next media"><ChevronRight /></button></>}<div className="media-stage" onTouchStart={(event) => { const touch = event.touches[0]; touchStart.current = { x: touch.clientX, y: touch.clientY } }} onTouchEnd={finishSwipe} onTouchCancel={() => { touchStart.current = null }} onClickCapture={(event) => { if (suppressClick.current) { suppressClick.current = false; event.preventDefault(); event.stopPropagation() } }} onClick={onClose}>{isVideo(post.ext) ? <video key={url} src={url} controls autoPlay playsInline loop onClick={(e) => e.stopPropagation()} /> : <img src={url} alt={post.filename || 'Full-size media'} referrerPolicy="no-referrer" onClick={(e) => e.stopPropagation()} />}</div><div className="media-caption"><strong>{post.filename}{post.ext}</strong><span>{formatBytes(post.fsize)} · {post.w}×{post.h}</span><em>{index + 1} / {posts.length}</em></div></div>
+  useEffect(() => () => { if (settleTimer.current !== null) clearTimeout(settleTimer.current) }, [])
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') navigateMedia(-1)
+      if (event.key === 'ArrowRight') navigateMedia(1)
+    }
+    addEventListener('keydown', key)
+    return () => removeEventListener('keydown', key)
+  })
+  const renderSlide = (slidePost: Post, active: boolean, position: string) => {
+    const slideUrl = mediaUrl(board, slidePost)!
+    return <div className="media-slide" key={position} aria-hidden={!active}>
+      {active && isVideo(slidePost.ext)
+        ? <video key={slideUrl} src={slideUrl} controls autoPlay playsInline loop onClick={(event) => event.stopPropagation()} />
+        : <img src={active ? slideUrl : (thumbnailUrl(board, slidePost) ?? slideUrl)} alt={active ? slidePost.filename || 'Full-size media' : ''} referrerPolicy="no-referrer" draggable={false} onClick={(event) => event.stopPropagation()} />}
+    </div>
+  }
+  return <div ref={dialogRef} className="media-viewer" role="dialog" aria-modal="true" aria-label="Media viewer" tabIndex={-1}>
+    <button className="media-close" onClick={onClose} aria-label="Close media viewer"><X /></button>
+    {posts.length > 1 && <><button className="media-nav previous" onClick={() => navigateMedia(-1)} aria-label="Previous media"><ChevronLeft /></button><button className="media-nav next" onClick={() => navigateMedia(1)} aria-label="Next media"><ChevronRight /></button></>}
+    <div className="media-stage" onTouchStart={startSwipe} onTouchMove={moveSwipe} onTouchEnd={finishSwipe} onTouchCancel={() => { touchStart.current = null; setDragOffset(0) }} onClickCapture={(event) => { if (suppressClick.current) { suppressClick.current = false; event.preventDefault(); event.stopPropagation() } }} onClick={onClose}>
+      <div className={`media-track ${settling ? 'settling' : ''}`} style={{ transform: `translate3d(calc(-100% + ${dragOffset}px), 0, 0)` }}>
+        {renderSlide(posts[previousIndex], false, 'previous')}
+        {renderSlide(post, true, 'current')}
+        {renderSlide(posts[nextIndex], false, 'next')}
+      </div>
+    </div>
+    <div className="media-caption"><strong>{post.filename}{post.ext}</strong><span>{formatBytes(post.fsize)} · {post.w}×{post.h}</span><em>{index + 1} / {posts.length}</em></div>
+  </div>
 }
 
 function MediaGallery({ board, posts, onSelect, onClose }: { board: string; posts: Post[]; onSelect: (index: number) => void; onClose: () => void }) {
