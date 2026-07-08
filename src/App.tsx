@@ -698,7 +698,15 @@ function useDialogAccessibility<T extends HTMLElement>(onClose: () => void) {
   return dialogRef
 }
 
-function Logo() { return <span className="logo"><svg viewBox="0 0 100 100" aria-hidden="true"><path d="M47 48C16 50 7 23 26 13 43 5 52 25 51 45Z"/><path d="M53 48C84 50 93 23 74 13 57 5 48 25 49 45Z"/><path d="M47 53C16 50 7 77 26 87 43 95 52 75 51 55Z"/><path d="M53 53C84 50 93 77 74 87 57 95 48 75 49 55Z"/><path d="m48 52 9 40 6-3-10-39Z"/></svg></span> }
+function Logo() {
+  return <span className="logo"><svg viewBox="0 0 64 64" aria-hidden="true">
+    <path className="logo-stem" d="M35 35c5.8 6.4 9.4 14 11.5 22.5" />
+    <path d="M32 34c-4.2-4.3-12-7.7-12-16A12 12 0 0 1 44 18c0 8.3-7.8 11.7-12 16Z" />
+    <path d="M30 32c4.3-4.2 7.7-12 16-12a12 12 0 0 1 0 24c-8.3 0-11.7-7.8-16-12Z" />
+    <path d="M32 30c4.2 4.3 12 7.7 12 16a12 12 0 0 1-24 0c0-8.3 7.8-11.7 12-16Z" />
+    <path d="M34 32c-4.3 4.2-7.7 12-16 12a12 12 0 0 1 0-24c8.3 0 11.7 7.8 16 12Z" />
+  </svg></span>
+}
 function isVideo(ext?: string) { return ext === '.webm' || ext === '.mp4' }
 function SectionHeading({ title, action }: { title: string; action: string }) { return <div className="section-heading"><h2>{title}</h2><span>{action}</span></div> }
 function LoadingCards() { return <div className="board-grid">{Array.from({ length: 12 }, (_, i) => <div className="board-card skeleton" key={i} />)}</div> }
